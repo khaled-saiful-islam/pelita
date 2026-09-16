@@ -51,7 +51,7 @@
     50%, 95% { opacity: 0.15; }
     100% { opacity: 1; }
   }
-  .streaming-caret::after {
+  .streaming-caret > :last-child::after {
     content: "";
     display: inline-block;
     width: 0.5ch;
@@ -63,9 +63,35 @@
     animation: pelita-caret 1.1s steps(1, end) infinite;
   }
 
+  /* The shimmer used on status text while the model is working. A moving
+     highlight reads as "in progress" without the jitter of bouncing dots. */
+  @keyframes pelita-shimmer {
+    0% { background-position: 180% 0; }
+    100% { background-position: -80% 0; }
+  }
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted-foreground)) 0%,
+      hsl(var(--muted-foreground)) 35%,
+      hsl(var(--foreground)) 50%,
+      hsl(var(--muted-foreground)) 65%,
+      hsl(var(--muted-foreground)) 100%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: pelita-shimmer 2.1s linear infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .streaming-caret::after {
+    .streaming-caret > :last-child::after,
+    .shimmer {
       animation: none;
+    }
+    .shimmer {
+      color: hsl(var(--muted-foreground));
     }
   }
 }

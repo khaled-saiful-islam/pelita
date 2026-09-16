@@ -1,0 +1,90 @@
+import { useEffect, useRef } from 'react'
+import { AlertCircle } from 'lucide-react'
+import { Logo } from '@/components/Logo'
+import { Markdown } from './Markdown'
+import { cn } from '@/lib/utils'
+import type { ChatMessage } from '@/hooks/useChat'
+
+export function MessageList({ messages }: { messages: ChatMessage[] }) {
+  const bottom = useRef<HTMLDivElement>(null)
+  const container = useRef<HTMLDivElement>(null)
+  const pinned = useRef(true)
+
+  // Follow the stream, but stop following the moment the reader scrolls up —
+  // yanking someone back to the bottom while they are reading is worse than
+  // making them scroll down themselves.
+  useEffect(() => {
+    const el = container.current
+    if (!el) return
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+      pinned.current = distance < 80
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    if (pinned.current) bottom.current?.scrollIntoView({ block: 'end' })
+  }, [messages])
+
+  return (
+    <div ref={container} className="flex-1 overflow-y-auto">
+      <div className="mx-auto w-full max-w-[var(--message-column)] px-4 py-8">
+        <div className="space-y-7">
+          {messages.map((message) => (
+            <MessageRow key={message.id} message={message} />
+          ))}
+        </div>
+        <div ref={bottom} className="h-px" />
+      </div>
+    </div>
+  )
+}
+
+function MessageRow({ message }: { message: ChatMessage }) {
+  if (message.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-bubble-user px-4 py-2.5 text-bubble-user-foreground">
+          <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed">{message.content}</p>
+        </div>
+      </div>
+    )
+  }
+
+  const waiting = message.streaming && message.content.length === 0
+
+  return (
+    <div className="group/message">
+      {waiting ? (
+        <Working />
+      ) : (
+        <div className={cn('min-w-0', message.streaming && 'streaming-caret')}>
+          <Markdown content={message.content} />
+        </div>
+      )}
+
+      {message.finish_reason === 'stopped' && (
+        <p className="mt-2 text-xs text-muted-foreground">Stopped by you.</p>
+      )}
+
+      {message.error && (
+        <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-destructive">
+          <AlertCircle className="size-3.5" aria-hidden />
+          {message.error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Shown between sending and the first token. */
+function Working() {
+  return (
+    <div className="flex items-center gap-2" role="status" aria-live="polite">
+      <Logo className="size-4 animate-pulse" />
+      <span className="shimmer text-sm">Thinking…</span>
+    </div>
+  )
+}

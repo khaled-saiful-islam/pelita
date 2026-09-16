@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Spinner } from '@/components/ui'
 import { AuthProvider, useAuth } from '@/lib/auth'
-import Home from '@/pages/Home'
+import Chat from '@/pages/Chat'
 import Profile from '@/pages/Profile'
 import SignIn from '@/pages/SignIn'
 
@@ -11,7 +11,8 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/signin" element={<PublicOnly><SignIn /></PublicOnly>} />
-          <Route path="/" element={<Protected><Home /></Protected>} />
+          <Route path="/" element={<Protected><Chat /></Protected>} />
+          <Route path="/c/:conversationId" element={<Protected><Chat /></Protected>} />
           <Route path="/profile" element={<Protected><Profile /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Alert, Button, Card, Field, Input } from '@/components/ui'
 import { useAuth } from '@/lib/auth'
+import { Logo } from '@/components/Logo'
 
 type Mode = 'signin' | 'signup'
 
@@ -43,7 +44,7 @@ export default function SignIn() {
     <main className="min-h-dvh grid place-items-center p-6">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <img src="/pelita.svg" alt="" className="size-11" />
+          <Logo className="size-9" />
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Pelita</h1>
             <p className="mt-1 text-sm text-muted-foreground">

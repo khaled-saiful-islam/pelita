@@ -12,13 +12,18 @@ from typing import Annotated
 from fastapi import Cookie, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.context.registry import build_contributors
 from app.core.config import Settings, get_settings
 from app.core.errors import AuthError
 from app.core.security import decode_access_token
 from app.db.models.user import User
 from app.db.repositories.users import SqlUserRepository
-from app.db.session import SessionFactory
+from app.db.session import SessionFactory, session_scope
+from app.providers.base import TokenBudget
+from app.providers.registry import build_provider
 from app.services.auth_service import AuthService
+from app.services.cancellation import registry as cancellation_registry
+from app.services.chat_service import ChatService
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -69,3 +74,24 @@ async def current_user(
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+
+
+def get_chat_service(settings: SettingsDep) -> ChatService:
+    """Built per request, but cheap: the provider holds no connection pool and
+    contributors are stateless."""
+    return ChatService(
+        session_maker=session_scope,
+        provider=build_provider(settings),
+        contributors=build_contributors(settings),
+        cancellation=cancellation_registry,
+        budget=TokenBudget(
+            memory=settings.memory_token_budget,
+            tools=settings.tools_token_budget,
+            history=settings.history_token_budget,
+        ),
+        max_tokens=settings.llm_max_tokens,
+        temperature=settings.llm_temperature,
+    )
+
+
+ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
