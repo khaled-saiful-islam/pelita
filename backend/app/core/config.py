@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
     llm_temperature: float = 0.7
 
+    system_prompt: str = (
+        "You are Pelita, a helpful assistant. Answer clearly and concisely. "
+        "If you are unsure about something, say so rather than guessing."
+    )
+
     # ---- Pricing (per 1M tokens, in `llm_price_currency`) ----------------
     llm_price_input_per_1m: float = 0.15
     llm_price_output_per_1m: float = 0.60
