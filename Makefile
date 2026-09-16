@@ -74,12 +74,16 @@ seed: ## Re-run the seed (idempotent)
 NODE := docker run --rm -v "$(PWD)/frontend:/app" -v pelita-node-modules:/app/node_modules \
 	-w /app node:22-alpine sh -c
 
+# Source is mounted rather than baked in, so test and lint see your edits
+# without a rebuild.
+PY_RUN := $(COMPOSE) run --rm --entrypoint="" -v "$(PWD)/backend:/srv" api
+
 test: ## Run backend and frontend tests
-	@$(COMPOSE) run --rm --entrypoint="" api python -m pytest -q --cov=app --cov-report=term-missing
+	@$(PY_RUN) python -m pytest -q --cov=app --cov-report=term-missing
 	@$(NODE) "npm install --silent --no-audit --no-fund && npm test"
 
 lint: ## Lint backend and frontend
-	@$(COMPOSE) run --rm --no-deps --entrypoint="" api python -m ruff check app tests
+	@$(PY_RUN) python -m ruff check app tests
 	@$(NODE) "npm install --silent --no-audit --no-fund && npm run lint"
 
 dev: .env ## Run with hot reload on both sides

@@ -54,9 +54,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://pelita:pelita@db:5432/pelita"
 
     # ---- Auth -----------------------------------------------------------
-    jwt_secret: str = "change-me-in-production"  # noqa: S105 - overridden via .env; README warns
+    # Long enough for HS256, and obviously a placeholder. `verify_deployment`
+    # refuses to start with this value when APP_ENV=production.
+    jwt_secret: str = "pelita-insecure-development-secret-change-me"  # noqa: S105
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7
+
+    # Secure cookies require HTTPS; leave off for local http:// development.
+    auth_cookie_secure: bool = False
 
     seed_admin_username: str = "admin"
     seed_admin_password: str = "admin"  # noqa: S105 - documented dev seed; README warns
@@ -116,6 +121,25 @@ class Settings(BaseSettings):
     def search_enabled(self) -> bool:
         """Web search is only offered when a key is actually present."""
         return bool(self.serpapi_key.strip())
+
+
+INSECURE_JWT_SECRET = "pelita-insecure-development-secret-change-me"  # noqa: S105
+INSECURE_PASSWORDS = frozenset({"admin", "password", "changeme"})
+MIN_JWT_SECRET_LENGTH = 32
+
+
+def deployment_warnings(settings: Settings) -> list[str]:
+    """Configuration that is fine locally and dangerous in production."""
+    problems: list[str] = []
+    if settings.jwt_secret == INSECURE_JWT_SECRET:
+        problems.append("JWT_SECRET is still the shipped default (openssl rand -hex 32)")
+    if len(settings.jwt_secret) < MIN_JWT_SECRET_LENGTH:
+        problems.append(f"JWT_SECRET is shorter than {MIN_JWT_SECRET_LENGTH} characters")
+    if settings.seed_admin_password.lower() in INSECURE_PASSWORDS:
+        problems.append("SEED_ADMIN_PASSWORD is a well-known default")
+    if not settings.auth_cookie_secure:
+        problems.append("AUTH_COOKIE_SECURE is off, so session cookies may travel over http")
+    return problems
 
 
 @lru_cache

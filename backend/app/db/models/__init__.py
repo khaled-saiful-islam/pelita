@@ -6,4 +6,6 @@ that is not listed produces a migration that silently drops its table.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from app.db.models.user import User
+
+__all__ = ["User"]

@@ -13,8 +13,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health
-from app.core.config import get_settings
+from app.api.routes import auth, health
+from app.core.config import deployment_warnings, get_settings
 from app.core.errors import PelitaError
 from app.core.logging import configure_logging
 
@@ -31,10 +31,30 @@ async def lifespan(app: FastAPI):
         settings.llm_model,
         settings.llm_base_url,
     )
+    _check_deployment_safety()
+
     yield
     from app.db.session import engine
 
     await engine.dispose()
+
+
+def _check_deployment_safety() -> None:
+    """Refuse to start in production with development credentials.
+
+    A warning is easy to miss in a log; a template that boots happily with its
+    shipped JWT secret is how that secret ends up on the internet.
+    """
+    problems = deployment_warnings(settings)
+    if not problems:
+        return
+    if settings.app_env.lower() in {"production", "prod"}:
+        raise RuntimeError(
+            "Refusing to start in production with development configuration:\n  - "
+            + "\n  - ".join(problems)
+        )
+    for problem in problems:
+        logger.warning("insecure for production: %s", problem)
 
 
 def create_app() -> FastAPI:
@@ -62,6 +82,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(health.router, prefix="/api")
+    app.include_router(auth.router, prefix="/api")
     return app
 
 
