@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "./theme.css";
+
+/* Base element styling. Everything here reads from theme.css tokens — no
+   literal colour appears below this line. */
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Scrollbars that do not fight the theme. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+@layer utilities {
+  /* The block caret shown while a response streams. */
+  @keyframes pelita-caret {
+    0%, 45% { opacity: 1; }
+    50%, 95% { opacity: 0.15; }
+    100% { opacity: 1; }
+  }
+  .streaming-caret::after {
+    content: "";
+    display: inline-block;
+    width: 0.5ch;
+    height: 1.05em;
+    margin-left: 0.12em;
+    vertical-align: text-bottom;
+    background-color: hsl(var(--primary));
+    border-radius: 1px;
+    animation: pelita-caret 1.1s steps(1, end) infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .streaming-caret::after {
+      animation: none;
+    }
+  }
+}

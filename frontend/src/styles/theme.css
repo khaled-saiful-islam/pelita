@@ -1,0 +1,209 @@
+/* ==========================================================================
+   Pelita theme — the whole look lives here.
+
+   Change the values in this file and every surface, border, shadow and accent
+   in the application follows. Nothing else in the codebase hardcodes a colour;
+   components only ever reference these tokens through Tailwind utilities.
+
+   To rebrand: edit the `--accent-*` ramp and the neutrals. That is the change.
+   ========================================================================== */
+
+/* Dark mode has three states: explicit dark, explicit light, and the system
+   default. Tailwind's `dark:` variant must follow the attribute, not the media
+   query alone, or an explicit choice cannot override the OS. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  /* --- Accent ramp: Pelita amber ---------------------------------------- */
+  --accent-50: 48 96% 95%;
+  --accent-100: 48 96% 89%;
+  --accent-200: 45 97% 77%;
+  --accent-300: 43 96% 66%;
+  --accent-400: 41 96% 57%;
+  --accent-500: 38 92% 50%;   /* #F59E0B — the brand colour */
+  --accent-600: 32 95% 44%;
+  --accent-700: 26 90% 37%;
+  --accent-800: 23 83% 31%;
+  --accent-900: 22 78% 26%;
+
+  /* --- Semantic surfaces ------------------------------------------------ */
+  --background: 40 33% 98%;
+  --foreground: 24 10% 12%;
+
+  --surface: 0 0% 100%;
+  --surface-foreground: 24 10% 12%;
+  --surface-raised: 40 30% 96%;
+
+  --sidebar: 40 24% 96%;
+  --sidebar-foreground: 24 8% 28%;
+
+  --muted: 40 20% 94%;
+  --muted-foreground: 25 6% 45%;
+
+  --border: 35 18% 89%;
+  --input: 35 18% 89%;
+  --ring: var(--accent-500);
+
+  --primary: var(--accent-500);
+  --primary-foreground: 26 65% 13%;
+
+  --secondary: 40 20% 94%;
+  --secondary-foreground: 24 10% 20%;
+
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --success: 142 65% 36%;
+  --warning: 38 92% 45%;
+
+  /* Message bubbles are their own tokens: the surface a user message sits on
+     is a design decision independent of cards and panels. */
+  --bubble-user: 40 28% 93%;
+  --bubble-user-foreground: 24 10% 15%;
+
+  /* --- Shape and depth -------------------------------------------------- */
+  --radius-sm: 0.375rem;
+  --radius: 0.625rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  --shadow-sm: 0 1px 2px 0 hsl(24 20% 12% / 0.05);
+  --shadow: 0 2px 8px -2px hsl(24 20% 12% / 0.08), 0 1px 2px hsl(24 20% 12% / 0.04);
+  --shadow-lg: 0 12px 32px -8px hsl(24 20% 12% / 0.14);
+
+  /* --- Typography ------------------------------------------------------- */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* --- Layout ----------------------------------------------------------- */
+  --sidebar-width: 17rem;
+  --message-column: 48rem;
+  --composer-max-height: 14rem;
+}
+
+/* System preference, unless the user has explicitly chosen light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: 24 10% 8%;
+    --foreground: 40 18% 94%;
+
+    --surface: 24 9% 11%;
+    --surface-foreground: 40 18% 94%;
+    --surface-raised: 24 8% 14%;
+
+    --sidebar: 24 10% 10%;
+    --sidebar-foreground: 40 12% 72%;
+
+    --muted: 24 8% 16%;
+    --muted-foreground: 35 10% 62%;
+
+    --border: 24 8% 20%;
+    --input: 24 8% 22%;
+
+    --primary: var(--accent-400);
+    --primary-foreground: 26 70% 10%;
+
+    --secondary: 24 8% 17%;
+    --secondary-foreground: 40 15% 88%;
+
+    --destructive: 0 62% 55%;
+    --success: 142 55% 45%;
+    --warning: 38 90% 58%;
+
+    --bubble-user: 24 8% 17%;
+    --bubble-user-foreground: 40 16% 92%;
+
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.3);
+    --shadow: 0 2px 10px -2px hsl(0 0% 0% / 0.45);
+    --shadow-lg: 0 16px 40px -10px hsl(0 0% 0% / 0.6);
+  }
+}
+
+/* Explicit choice always wins, in both directions. */
+[data-theme="dark"] {
+  --background: 24 10% 8%;
+  --foreground: 40 18% 94%;
+
+  --surface: 24 9% 11%;
+  --surface-foreground: 40 18% 94%;
+  --surface-raised: 24 8% 14%;
+
+  --sidebar: 24 10% 10%;
+  --sidebar-foreground: 40 12% 72%;
+
+  --muted: 24 8% 16%;
+  --muted-foreground: 35 10% 62%;
+
+  --border: 24 8% 20%;
+  --input: 24 8% 22%;
+
+  --primary: var(--accent-400);
+  --primary-foreground: 26 70% 10%;
+
+  --secondary: 24 8% 17%;
+  --secondary-foreground: 40 15% 88%;
+
+  --destructive: 0 62% 55%;
+  --success: 142 55% 45%;
+  --warning: 38 90% 58%;
+
+  --bubble-user: 24 8% 17%;
+  --bubble-user-foreground: 40 16% 92%;
+
+  --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.3);
+  --shadow: 0 2px 10px -2px hsl(0 0% 0% / 0.45);
+  --shadow-lg: 0 16px 40px -10px hsl(0 0% 0% / 0.6);
+}
+
+/* --- Expose the tokens to Tailwind --------------------------------------
+   Everything above is plain CSS. This block is the only Tailwind-specific
+   part, and it exists so `bg-surface` and `text-muted-foreground` resolve to
+   the tokens rather than to a second, competing palette. */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-surface: hsl(var(--surface));
+  --color-surface-foreground: hsl(var(--surface-foreground));
+  --color-surface-raised: hsl(var(--surface-raised));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-bubble-user: hsl(var(--bubble-user));
+  --color-bubble-user-foreground: hsl(var(--bubble-user-foreground));
+
+  --color-accent-50: hsl(var(--accent-50));
+  --color-accent-100: hsl(var(--accent-100));
+  --color-accent-200: hsl(var(--accent-200));
+  --color-accent-300: hsl(var(--accent-300));
+  --color-accent-400: hsl(var(--accent-400));
+  --color-accent-500: hsl(var(--accent-500));
+  --color-accent-600: hsl(var(--accent-600));
+  --color-accent-700: hsl(var(--accent-700));
+  --color-accent-800: hsl(var(--accent-800));
+  --color-accent-900: hsl(var(--accent-900));
+
+  --radius-sm: var(--radius-sm);
+  --radius-DEFAULT: var(--radius);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-DEFAULT: var(--shadow);
+  --shadow-lg: var(--shadow-lg);
+}
