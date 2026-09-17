@@ -43,6 +43,18 @@ async def index(
     )
 
 
+@router.post("", response_model=ConversationSummary, status_code=status.HTTP_201_CREATED)
+async def create(session: SessionDep, user: CurrentUser) -> ConversationSummary:
+    """Start an empty conversation.
+
+    Needed because a file is attached to a conversation, and someone can attach
+    one before they have typed anything. The title stays "New chat" until the
+    first message replaces it.
+    """
+    conversation = await SqlConversationRepository(session).create(user.id, "New chat")
+    return ConversationSummary.model_validate(conversation)
+
+
 @router.get("/{conversation_id}", response_model=ConversationDetail)
 async def show(
     conversation_id: UUID,

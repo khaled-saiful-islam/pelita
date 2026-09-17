@@ -24,6 +24,17 @@ class StoredMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class AttachedDocument:
+    """A file the user attached, as text the model can read."""
+
+    id: UUID
+    filename: str
+    text: str
+    unit: str
+    unit_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class TurnContext:
     """Everything a contributor is allowed to know about the current turn.
 
@@ -41,6 +52,8 @@ class TurnContext:
     language: str | None = None
     # Output of any tools that ran for this turn (search, news, later RAG).
     tool_results: tuple[ToolResult, ...] = ()
+    # Files attached to the conversation, oldest first.
+    documents: tuple[AttachedDocument, ...] = ()
 
 
 @runtime_checkable

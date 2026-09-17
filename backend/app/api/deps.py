@@ -104,6 +104,8 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
             suggestions_count=settings.suggestions_count,
             memory_auto_extract=settings.memory_auto_extract,
             memory_max_per_user=settings.memory_max_per_user,
+            document_max_bytes=settings.document_max_bytes,
+            document_max_per_conversation=settings.document_max_per_conversation,
         ),
     )
 

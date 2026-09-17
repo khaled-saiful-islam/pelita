@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Check, Globe, Square } from 'lucide-react'
+import { useRef as useNodeRef } from 'react'
+import { ArrowUp, Check, Globe, Paperclip, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SearchMode } from '@/hooks/useChat'
+import { ACCEPT_ATTRIBUTE, type AttachedFile } from '@/hooks/useDocuments'
+import { Attachments } from './Attachments'
 
 const MAX_HEIGHT_PX = 224 // matches --composer-max-height in theme.css
 const SEARCH_MODE_KEY = 'pelita-search-mode'
@@ -29,6 +32,11 @@ export function Composer({
   streaming,
   disabled,
   searchEnabled,
+  files,
+  uploadingFile,
+  atFileLimit,
+  onAttach,
+  onRemoveFile,
   placeholder = 'Message Pelita…',
   autoFocus,
 }: {
@@ -38,12 +46,18 @@ export function Composer({
   disabled?: boolean
   /** False when SERPAPI_KEY is unset; the toggle is shown but not usable. */
   searchEnabled: boolean
+  files: AttachedFile[]
+  uploadingFile: string | null
+  atFileLimit: boolean
+  onAttach: (file: File) => void
+  onRemoveFile: (id: string) => void
   placeholder?: string
   autoFocus?: boolean
 }) {
   const [value, setValue] = useState('')
   const [searchMode, setSearchMode] = useState<SearchMode>(readMode)
   const [menuOpen, setMenuOpen] = useState(false)
+  const filePicker = useNodeRef<HTMLInputElement>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
 
   // Grow with the content up to a ceiling, then scroll inside.
@@ -81,6 +95,8 @@ export function Composer({
             'transition-shadow focus-within:ring-2 focus-within:ring-ring',
           )}
         >
+        <Attachments files={files} uploading={uploadingFile} onRemove={onRemoveFile} />
+
         <div className="flex items-end gap-2">
           <textarea
             ref={textarea}
@@ -130,6 +146,39 @@ export function Composer({
         </div>
 
         <div className="relative flex items-center gap-1 px-1 pt-1.5">
+          <input
+            ref={filePicker}
+            type="file"
+            accept={ACCEPT_ATTRIBUTE}
+            className="hidden"
+            onChange={(event) => {
+              const chosen = event.target.files?.[0]
+              if (chosen) onAttach(chosen)
+              // Reset so picking the same file twice still fires a change.
+              event.target.value = ''
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => filePicker.current?.click()}
+            disabled={atFileLimit || Boolean(uploadingFile)}
+            title={
+              atFileLimit
+                ? 'This chat has reached its file limit'
+                : 'Attach a file (text, Markdown, CSV, JSON, PDF or Word)'
+            }
+            aria-label="Attach a file"
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors',
+              atFileLimit || uploadingFile
+                ? 'cursor-not-allowed text-muted-foreground/50'
+                : 'text-muted-foreground hover:bg-muted',
+            )}
+          >
+            <Paperclip className="size-3.5" aria-hidden />
+            Attach
+          </button>
+
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}

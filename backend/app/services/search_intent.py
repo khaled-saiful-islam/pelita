@@ -105,8 +105,13 @@ async def decide(
     message: str,
     *,
     provider: LLMProvider | None = None,
+    has_documents: bool = False,
 ) -> SearchDecision:
     """Return whether this message warrants a web search.
+
+    `has_documents` says files are attached to this conversation, which changes
+    the default for anything ambiguous: someone who attached a brief and asks
+    about "the budget" means the brief, not the web.
 
     Never raises: if the classifier fails, the answer is "no search", because a
     slightly stale answer is better than a failed turn.
@@ -131,6 +136,11 @@ async def decide(
 
     if match := NEEDS_CURRENT.search(text):
         return SearchDecision(True, f"mentions {match.group(0).lower()!r}")
+
+    if has_documents:
+        # Explicit time-sensitive wording above still searches; everything else
+        # is assumed to be about the files, and costs no classifier call.
+        return SearchDecision(False, "answering from the attached files")
 
     if provider is None:
         return SearchDecision(False, "no classifier available")

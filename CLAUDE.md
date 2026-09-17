@@ -44,6 +44,7 @@ have designed it wrong — pass the values in.
 | Prompt sources | `context/base.py` | `context/registry.py` |
 | Tools | `tools/base.py` | `tools/registry.py` |
 | Search backends | `tools/serpapi.py` | used by the tools above |
+| File readers | `services/document_extract.py` | `classify()` |
 
 Adding one is a new file plus one registry line. If your change requires editing
 three existing files, stop and ask whether the seam is in the wrong place.
@@ -64,10 +65,14 @@ This is the central design idea. `context/pipeline.py` sorts contributors by
 100  system prompt
 200  memory
 300  tool results
-350  free — retrieval / RAG goes here
+350  attached files — the retrieval slot (`context/documents.py`)
 400  history
 500  the user message
 ```
+
+Document upload is the proof that this works: it landed as one contributor plus
+one registry line, with no branch added to the turn. A real retriever replaces
+that contributor at the same order without touching anything else.
 
 To put something new in front of the model, write a class with `name`, `order`
 and `contribute()`, and add one line to `context/registry.py`. Do not add
@@ -93,7 +98,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently ~84% backend.
+Target 80%. Currently 86% backend, across 502 backend and 38 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -204,6 +209,15 @@ Be honest about these rather than discovering them:
   injection guard.
 - **One tool per turn.** `_select_tool` returns a single tool; running several,
   or the same one repeatedly, is the agent-loop change described above.
+- **Document retrieval is keyword scoring**, not embeddings. It misses synonyms:
+  a question about "notice period" does not rank a paragraph headed
+  "Termination" any higher unless the word appears. Deliberate — it needs no
+  vector store and no indexing step — but it is the ceiling of the approach, and
+  order 350 is designed so a real retriever can replace it.
+- **Attached files are re-sent every turn** and cost `DOCUMENTS_TOKEN_BUDGET`
+  each time. No excerpt caching between turns.
+- **Extraction is synchronous.** A 5 MB PDF holds its request for a second or
+  two.
 
 ## Things that will look wrong but are deliberate
 
@@ -212,6 +226,12 @@ Be honest about these rather than discovering them:
   and a cost table that mixes measured and guessed numbers is worse than none.
 - **Guard severity depends on the source.** A user telling their assistant to
   ignore its instructions is a preference; a web page saying it is an attack.
+- **Uploads are stored as extracted text, not as bytes.** No object storage to
+  configure, and a bad PDF fails once at upload rather than inside a chat turn.
+  The cost is that the original cannot be shown back or re-parsed later.
+- **The document budget is split evenly across files**, not first-come.
+  Otherwise one long file consumes it and a question about the third is answered
+  from nothing, with no way for the user to see why.
 - **The news MCP server runs in its own virtualenv** at `/opt/mcp-news` pinned to
   `mcp<2`, while the client uses `mcp` 2.x. Verified to interoperate over stdio.
 - **Costs use `Decimal` and six decimal places.** A 40-token reply costs

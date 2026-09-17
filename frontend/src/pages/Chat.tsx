@@ -8,10 +8,13 @@ import { MessageList } from '@/components/chat/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { ConversationUsage } from '@/components/chat/Usage'
 import { NewsStrip } from '@/components/news/NewsStrip'
+import { AttachmentError } from '@/components/chat/AttachmentError'
 import { Suggestions } from '@/components/chat/Suggestions'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
 import { useConfig } from '@/hooks/useConfig'
+import { useDocuments } from '@/hooks/useDocuments'
+import { apiFetch } from '@/lib/api'
 
 export default function Chat() {
   const { conversationId: routeId } = useParams<{ conversationId: string }>()
@@ -34,6 +37,9 @@ export default function Chat() {
   const chat = useChat(onConversationStarted)
   const { load, reset } = chat
 
+  const activeConversationId = chat.conversationId ?? routeId ?? null
+  const documents = useDocuments(activeConversationId)
+
   useEffect(() => {
     setLoadError(null)
     if (!routeId) {
@@ -45,8 +51,33 @@ export default function Chat() {
 
   function startNew() {
     reset()
+    documents.reset()
     navigate('/')
     setMenuOpen(false)
+  }
+
+  /**
+   * Attach a file, creating the conversation first if there is not one yet.
+   *
+   * A file belongs to a conversation, and someone can attach one before typing
+   * anything — so the chat starts when the file does.
+   */
+  async function attach(file: File) {
+    let target = activeConversationId
+    if (!target) {
+      try {
+        const created = await apiFetch<{ id: string; title: string }>('/conversations', {
+          method: 'POST',
+        })
+        target = created.id
+        list.upsert(created.id, created.title)
+        window.history.replaceState(null, '', `/c/${created.id}`)
+        navigate(`/c/${created.id}`, { replace: true })
+      } catch {
+        return
+      }
+    }
+    await documents.attach(file, target)
   }
 
   async function remove(id: string) {
@@ -54,14 +85,13 @@ export default function Chat() {
     if (id === chat.conversationId || id === routeId) startNew()
   }
 
-  const activeId = chat.conversationId ?? routeId ?? null
   const empty = chat.messages.length === 0
 
   return (
     <div className="flex h-dvh overflow-hidden">
       <Sidebar
         conversations={list.conversations}
-        activeId={activeId}
+        activeId={activeConversationId}
         loading={list.loading}
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
@@ -91,11 +121,11 @@ export default function Chat() {
             </div>
             <div className="flex shrink-0 items-center gap-3">
               {chat.totals && <ConversationUsage totals={chat.totals} />}
-            {activeId && (
+            {activeConversationId && (
               // A plain link, not fetch-and-blob: the browser already knows how
               // to save a file the server marked as an attachment.
               <a
-                href={`/api/conversations/${activeId}/export`}
+                href={`/api/conversations/${activeConversationId}/export`}
                 download
                 className="shrink-0"
                 title="Export as Markdown"
@@ -137,11 +167,22 @@ export default function Chat() {
 
         {empty && <NewsStrip />}
 
+        {documents.error && (
+          <AttachmentError message={documents.error} onDismiss={documents.clearError} />
+        )}
+
         <Composer
           onSend={(text, options) => chat.send(text, { searchMode: options.searchMode })}
           onStop={chat.stop}
           streaming={chat.streaming}
           searchEnabled={config?.search_enabled ?? false}
+          files={documents.files}
+          uploadingFile={documents.uploading}
+          atFileLimit={documents.files.length >= documents.maxFiles}
+          onAttach={attach}
+          onRemoveFile={(id) => {
+            if (activeConversationId) void documents.remove(id, activeConversationId)
+          }}
           autoFocus
         />
       </main>

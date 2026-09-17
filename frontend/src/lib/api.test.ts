@@ -54,3 +54,18 @@ describe('apiFetch', () => {
     await expect(apiFetch('/memories/1')).resolves.toBeUndefined()
   })
 })
+
+describe('apiFetch content type', () => {
+  it('does not set a JSON content type for FormData', async () => {
+    // The browser generates the multipart boundary; overriding the header
+    // leaves the server unable to parse the upload at all.
+    const spy = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', spy)
+
+    const body = new FormData()
+    body.append('file', new Blob(['x']), 'x.txt')
+    await apiFetch('/upload', { method: 'POST', body })
+
+    expect(spy.mock.calls[0][1].headers).not.toHaveProperty('Content-Type')
+  })
+})

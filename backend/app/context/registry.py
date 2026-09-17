@@ -9,7 +9,7 @@ Reserved order values:
     100  system prompt
     200  memory                  (feature 013)
     300  tool results            (feature 011)
-    350  free — retrieval / RAG
+    350  attached documents      (feature 018) — and where retrieval belongs
     400  history
     500  user message
 """
@@ -24,6 +24,7 @@ from app.context.contributors import (
     ToolResultsContributor,
     UserMessageContributor,
 )
+from app.context.documents import DocumentContributor
 from app.core.config import Settings, get_settings
 
 
@@ -37,6 +38,7 @@ def build_contributors(
         SystemPromptContributor(settings.system_prompt),
         MemoryContributor(memories),
         ToolResultsContributor(),
+        DocumentContributor(settings.documents_token_budget),
         HistoryContributor(),
         UserMessageContributor(),
     )

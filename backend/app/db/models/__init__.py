@@ -7,6 +7,7 @@ that is not listed produces a migration that silently drops its table.
 from __future__ import annotations
 
 from app.db.models.conversation import Conversation, Message
+from app.db.models.document import Document
 from app.db.models.feedback import MessageFeedback
 from app.db.models.guard_event import GuardEvent
 from app.db.models.memory import Memory
@@ -16,6 +17,7 @@ from app.db.models.user import User
 
 __all__ = [
     "Conversation",
+    "Document",
     "GuardEvent",
     "Memory",
     "Message",

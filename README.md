@@ -7,7 +7,7 @@ Switching from OpenAI to Groq, Ollama, OpenRouter or vLLM means editing three
 lines of `.env`. No code change, no vendor SDK — nothing in this repository
 imports `openai`, `anthropic` or anything like them.
 
-![Pelita](docs/images/screenshot.png)
+![Pelita — a chat about an attached brief, in dark theme](docs/images/screenshot.png)
 
 ## Quick start
 
@@ -46,6 +46,7 @@ default.
 |---|---|
 | **Streaming chat** | Token-by-token over SSE, with a stop button that cancels on the server and keeps the partial answer |
 | **Web search** | Optional per message. Shows "Searching the web…" while it runs and lists numbered sources under the answer |
+| **Attached files** | Text, PDF and Word files — three per chat, 5 MB each. Ask about any of them, including across files |
 | **News strip** | Headlines on the new-chat screen, pulled from an MCP server via the official Python SDK and cached for 30 minutes |
 | **Token and cost accounting** | Per message and per conversation, labelled as provider-reported or estimated so a total is never quietly a guess |
 | **Language auto-detection** | Replies in the language of your first message. Verified for Bahasa Melayu, English, Tamil, Chinese and Bengali |
@@ -79,6 +80,7 @@ is the only prerequisite.
 | `WEB_PORT` / `API_PORT` | `8080` / `8000` | Change if something else holds the port |
 | `SERPAPI_KEY` | *(empty)* | Enables web search. The toggle stays disabled without it |
 | `LLM_PRICE_INPUT_PER_1M` / `_OUTPUT_PER_1M` | `0.15` / `0.60` | **Set to your provider's real rates**, or the cost column is fiction |
+| `DOCUMENT_MAX_BYTES` / `_MAX_PER_CONVERSATION` | `5 MB` / `3` | Attached-file limits. Raising the size means raising `client_max_body_size` in `frontend/nginx.conf` too |
 | `SUPPORTED_LANGUAGES` | `en,ms,ta,zh,bn` | Languages to detect between |
 | `MEMORY_AUTO_EXTRACT` | `true` | `false` removes one model call per turn |
 | `SUGGESTIONS_ENABLED` | `true` | `false` removes one model call per turn |
@@ -95,9 +97,9 @@ search backends are each one file plus one registry line. Nothing else imports a
 concrete implementation.
 
 **The prompt is built by ordered contributors.** System prompt at 100, memory at
-200, tool results at 300, history at 400, the user message at 500. Adding
-retrieval is a new file at order 350 — no existing code changes. There is a test
-that proves it.
+200, tool results at 300, attached files at 350, history at 400, the user message
+at 500. Document upload shipped as one contributor at the retrieval slot plus one
+registry line, with no change to the chat turn — which is the claim, tested.
 
 **Logic never imports FastAPI.** `services/`, `providers/`, `guards/`,
 `context/` and `tools/` hold logic; `api/` holds HTTP. An AST test fails the
@@ -131,7 +133,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-363 backend tests and 17 frontend tests, 85% backend coverage. The
+502 backend tests and 38 frontend tests, 86% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.

@@ -36,7 +36,10 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   const response = await fetch(`/api${path}`, {
     ...init,
     headers: {
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      // Only for a JSON body. FormData must set its own content type, because
+      // the boundary is generated per request — overriding it makes the server
+      // unable to parse a multipart upload at all.
+      ...(isJsonBody(init.body) ? { 'Content-Type': 'application/json' } : {}),
       ...init.headers,
     },
   })
@@ -44,6 +47,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (!response.ok) throw await toApiError(response)
   if (response.status === 204) return undefined as T
   return (await response.json()) as T
+}
+
+/** A string body is JSON here; FormData, Blob and friends are not. */
+function isJsonBody(body: BodyInit | null | undefined): boolean {
+  return typeof body === 'string'
 }
 
 export interface PublicConfig {

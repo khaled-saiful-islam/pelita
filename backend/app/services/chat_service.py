@@ -29,7 +29,12 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.context.base import ContextContributor, StoredMessage, TurnContext
+from app.context.base import (
+    AttachedDocument,
+    ContextContributor,
+    StoredMessage,
+    TurnContext,
+)
 from app.context.pipeline import build_messages
 from app.core.errors import NotFoundError, ValidationError
 from app.core.tokens import count_message_tokens, count_tokens
@@ -53,6 +58,7 @@ from app.providers.base import (
 from app.providers.base import UsageEvent as ProviderUsageEvent
 from app.services.accounting_service import Accounting, Pricing, price
 from app.services.cancellation import CancellationRegistry
+from app.services.document_service import DocumentService
 from app.services.events import (
     AccountingEvent,
     ChatEvent,
@@ -102,6 +108,8 @@ class TurnSettings:
     suggestions_count: int = 3
     memory_auto_extract: bool = True
     memory_max_per_user: int = 100
+    document_max_bytes: int = 5 * 1024 * 1024
+    document_max_per_conversation: int = 3
 
 
 @dataclass(slots=True)
@@ -184,9 +192,14 @@ class ChatService:
         cancel = self._cancellation.register(assistant_id)
 
         try:
-            async for event in self._prepare(state, search_mode):
+            # Loaded before the tool decision, because attached files change
+            # what an ambiguous question is probably about.
+            documents = await self._documents_for(start.conversation_id)
+            async for event in self._prepare(
+                state, search_mode, has_documents=bool(documents)
+            ):
                 yield event
-            async for event in self._generate(state, start, user_id, cancel):
+            async for event in self._generate(state, start, user_id, cancel, documents):
                 yield event
         except ProviderError as exc:
             state.finish, state.error = FinishReason.ERROR, exc.message
@@ -241,12 +254,16 @@ class ChatService:
 
     # -- phase 2: prepare ------------------------------------------------
 
-    async def _prepare(self, state: TurnState, search_mode: str) -> AsyncIterator[ChatEvent]:
+    async def _prepare(
+        self, state: TurnState, search_mode: str, *, has_documents: bool
+    ) -> AsyncIterator[ChatEvent]:
         """Guards, then whichever tool the turn calls for."""
         for verdict in self._scan(state.question, ContentSource.USER_INPUT):
             yield guard_payload(verdict)
 
-        decision = await self._should_search(search_mode, state.question)
+        decision = await self._should_search(
+            search_mode, state.question, has_documents=has_documents
+        )
         tool = self._select_tool(decision)
         if tool is None:
             return
@@ -309,7 +326,12 @@ class ChatService:
     # -- phase 3: generate -----------------------------------------------
 
     async def _generate(
-        self, state: TurnState, start: StartEvent, user_id: UUID, cancel: Event
+        self,
+        state: TurnState,
+        start: StartEvent,
+        user_id: UUID,
+        cancel: Event,
+        documents: tuple[AttachedDocument, ...],
     ) -> AsyncIterator[ChatEvent]:
         memories = await self._memories_for(user_id)
         turn = TurnContext(
@@ -321,6 +343,7 @@ class ChatService:
             budget=self._settings.budget,
             language=state.language,
             tool_results=state.citations,
+            documents=documents,
         )
         state.prompt, trace = await build_messages(turn, self._build_contributors(memories))
         logger.info("prompt assembled for %s: %s", start.assistant_message_id, trace.as_dict())
@@ -452,7 +475,9 @@ class ChatService:
 
     # -- helpers ---------------------------------------------------------
 
-    async def _should_search(self, mode: str, content: str) -> SearchDecision:
+    async def _should_search(
+        self, mode: str, content: str, *, has_documents: bool = False
+    ) -> SearchDecision:
         """Resolve the three-state mode into a decision.
 
         `always` still goes through here so a missing key is a no-op rather than
@@ -462,7 +487,7 @@ class ChatService:
             return SearchDecision(False, "search off")
         if mode == "always":
             return SearchDecision(True, "search always on")
-        return await decide(content, provider=self._provider)
+        return await decide(content, provider=self._provider, has_documents=has_documents)
 
     def _estimate(self, state: TurnState) -> Usage:
         """Count tokens ourselves when the provider did not report any."""
@@ -483,6 +508,30 @@ class ChatService:
                 return tuple(m.content for m in found)
         except Exception:  # noqa: BLE001 - losing memory degrades, never breaks
             logger.exception("could not load memories for %s", user_id)
+            return ()
+
+    async def _documents_for(self, conversation_id: UUID) -> tuple[AttachedDocument, ...]:
+        """Files attached to this conversation, oldest first. Never raises."""
+        try:
+            async with self._session_maker() as session:
+                found = await DocumentService(
+                    session,
+                    max_bytes=self._settings.document_max_bytes,
+                    max_per_conversation=self._settings.document_max_per_conversation,
+                    model=self._provider.info.model,
+                ).list_for(conversation_id)
+                return tuple(
+                    AttachedDocument(
+                        id=d.id,
+                        filename=d.filename,
+                        text=d.text,
+                        unit=d.unit,
+                        unit_count=d.unit_count,
+                    )
+                    for d in found
+                )
+        except Exception:  # noqa: BLE001 - losing a file degrades, never breaks
+            logger.exception("could not load documents for %s", conversation_id)
             return ()
 
     async def _extract_memories(self, user_id: UUID, question: str, answer: str) -> None:

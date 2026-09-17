@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     memory_token_budget: int = 512
     tools_token_budget: int = 2048
     history_token_budget: int = 4096
+    documents_token_budget: int = 8192
 
     # ---- Database -------------------------------------------------------
     database_url: str = "postgresql+asyncpg://pelita:pelita@db:5432/pelita"
@@ -81,6 +82,10 @@ class Settings(BaseSettings):
     mcp_news_ttl_seconds: int = 1800
     mcp_news_timeout_seconds: float = 20.0
     mcp_news_max_items: int = 6
+
+    # ---- Documents ------------------------------------------------------
+    document_max_bytes: int = 5 * 1024 * 1024
+    document_max_per_conversation: int = 3
 
     # ---- Memory ---------------------------------------------------------
     memory_auto_extract: bool = True

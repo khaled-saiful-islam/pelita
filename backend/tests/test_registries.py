@@ -49,20 +49,25 @@ def test_contributors_match_the_documented_order() -> None:
         ("system_prompt", 100),
         ("memory", 200),
         ("tool_results", 300),
+        ("documents", 350),
         ("history", 400),
         ("user_message", 500),
     ]
 
 
-def test_retrieval_can_still_be_slotted_in_without_renumbering() -> None:
-    """The template's central claim: adding RAG is one file at order 350.
+def test_retrieval_reads_after_standing_context_and_before_history() -> None:
+    """The template's central claim, now occupied: material fetched for this
+    turn sits at 350.
 
-    Asserted as an invariant rather than against a fixed list, so it keeps
-    meaning something as more contributors are registered.
+    Attached files took the slot without renumbering anything. A vector-store
+    retriever replaces that contributor at the same order, so this is asserted
+    as a position rather than against a fixed list.
     """
-    orders = sorted(c.order for c in build_contributors(settings_for()))
-    assert 350 not in orders
-    assert min(orders) < 350 < max(orders)
+    orders = {c.name: c.order for c in build_contributors(settings_for())}
+    retrieval = orders["documents"]
+    assert retrieval == 350
+    assert orders["memory"] < retrieval < orders["history"]
+    assert orders["tool_results"] < retrieval < orders["user_message"]
 
 
 def test_every_contributor_has_a_distinct_order() -> None:
