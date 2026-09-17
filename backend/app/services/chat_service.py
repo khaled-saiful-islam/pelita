@@ -44,6 +44,7 @@ from app.services.accounting_service import Accounting, Pricing, price
 from app.services.cancellation import CancellationRegistry
 from app.services.language_service import detect_language
 from app.services.memory_service import MemoryService
+from app.services.search_intent import SearchDecision, decide
 from app.services.suggestion_service import suggest
 from app.tools.serpapi import SearchProvider, SearchUnavailable
 
@@ -208,7 +209,7 @@ class ChatService:
         conversation_id: UUID | None,
         content: str = "",
         regenerate_of: UUID | None = None,
-        use_search: bool = False,
+        search_mode: str = "auto",
     ) -> AsyncIterator[ChatEvent]:
         if regenerate_of is None:
             content = content.strip()
@@ -238,12 +239,13 @@ class ChatService:
                 yield _guard_payload(verdict)
 
             tool_results: tuple[ToolResult, ...] = ()
-            if use_search and self._search is not None:
+            decision = await self._should_search(search_mode, content)
+            if decision.needs_search and self._search is not None:
                 yield ToolEvent(
                     tool=self._search.name,
                     status="running",
                     label="Searching the web",
-                    detail=content[:80],
+                    detail=decision.reason,
                 )
                 try:
                     found = await self._search.search(content, limit=self._search_limit)
@@ -362,6 +364,18 @@ class ChatService:
         return self._cancellation.cancel(message_id)
 
     # -- internals -------------------------------------------------------
+
+    async def _should_search(self, mode: str, content: str) -> SearchDecision:
+        """Resolve the three-state mode into a yes or no.
+
+        `always` still goes through here so that a missing SERPAPI_KEY is a
+        no-op rather than an error the user has to understand.
+        """
+        if self._search is None or mode == "off":
+            return SearchDecision(False, "search off")
+        if mode == "always":
+            return SearchDecision(True, "search always on")
+        return await decide(content, provider=self._provider)
 
     def _scan(self, text: str, source: ContentSource) -> list[GuardVerdict]:
         """Run every guard over one piece of text, returning only what fired."""

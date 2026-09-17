@@ -120,7 +120,7 @@ export default function Chat() {
         {empty && <NewsStrip />}
 
         <Composer
-          onSend={(text, options) => chat.send(text, { useSearch: options.useSearch })}
+          onSend={(text, options) => chat.send(text, { searchMode: options.searchMode })}
           onStop={chat.stop}
           streaming={chat.streaming}
           searchEnabled={config?.search_enabled ?? false}

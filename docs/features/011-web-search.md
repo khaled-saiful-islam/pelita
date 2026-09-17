@@ -2,20 +2,53 @@
 
 ## What it does
 
-An explicit Search toggle in the composer. When on, Pelita runs a SerpAPI search
-before answering, tells you it is doing so, feeds the results into the prompt,
-and lists the sources under the answer.
+Searches the web when a question needs current information, tells you it is
+doing so and why, feeds the results into the prompt, and lists the sources under
+the answer.
 
 ## How it works
 
-### An explicit toggle, not intent detection
+### Three modes
 
-Guessing when a question needs the web means either a classifier call on every
-message or a keyword heuristic that is wrong in both directions. A toggle is
-predictable, costs nothing when off, and is trivially testable.
+| mode | behaviour |
+|---|---|
+| **Auto** (default) | Decides per message whether the question needs the web |
+| **Always** | Searches every message |
+| **Off** | Never searches |
 
-Intent detection remains available as a later addition — it would be a service
-that flips `use_search`, with nothing else changing.
+The choice persists in `localStorage`. A preference that resets on reload is not
+a preference — the first version of this feature was a plain toggle that reset
+on every page load, which meant "what is the current weather in KL?" answered
+from training data and looked broken.
+
+### Auto-detection is two stages, cheapest first
+
+Most messages are obvious in either direction:
+
+- **"Needs current information"** patterns — weather, news, prices, *latest*,
+  *today*, *who won*, *still maintained* — search immediately, no model call.
+- **"Never needs it"** patterns — *write me a*, *translate*, *refactor*,
+  *calculate*, or any fenced code block — skip immediately, no model call.
+- **Everything else** gets one cheap classification call capped at four output
+  tokens.
+
+Classifying every message with an LLM would add a round trip to "write me a
+haiku" for no benefit. Classifying none of them is what caused the bug above.
+
+A failing classifier means no search, never a failed turn.
+
+### The reason is shown
+
+The decision carries why it fired, and the tool row displays it:
+
+```
+Searching the web · mentions 'current'
+Searched the web · 5 results
+```
+
+Auto-detection that cannot explain itself looks like the app searching at
+random, and the first thing someone does with behaviour they cannot predict is
+switch it off.
 
 ### The user is told what is happening
 
@@ -53,11 +86,13 @@ exchange. They are trimmed to `TOOLS_TOKEN_BUDGET` whole blocks at a time.
 reload. An answer you cannot check is worth less than one you can. Regenerating
 replaces them wholesale rather than accumulating.
 
-### The toggle reflects reality
+### The control reflects reality
 
 `/api/config` reports `search_enabled`, which is simply whether `SERPAPI_KEY` is
-non-empty. With no key the toggle renders disabled with a tooltip naming the
-variable, instead of offering a button that always fails.
+non-empty. With no key the control renders disabled with a tooltip naming the
+variable, instead of offering a button that always fails. `always` is also
+resolved through the same check, so a missing key is a no-op rather than an
+error to understand.
 
 ## Configuration
 
@@ -67,6 +102,8 @@ variable, instead of offering a button that always fails.
 | `SERPAPI_BASE_URL` | `https://serpapi.com/search` | Override for a proxy |
 | `SEARCH_MAX_RESULTS` | `5` | Results fetched per search |
 | `TOOLS_TOKEN_BUDGET` | `2048` | Ceiling on what reaches the prompt |
+
+Search mode is a per-browser preference, not a deployment setting.
 
 ## How to extend it
 
@@ -90,6 +127,11 @@ database lookup, a retrieval step — with no frontend change.
   what the search engine summarises.
 - **One search per turn**, on the raw user message. No query rewriting and no
   follow-up searches.
+- **Auto-detection patterns are English only.** A Malay or Chinese question
+  about today's weather falls through to the classifier call rather than being
+  caught by pattern.
+- **The classifier can be wrong in both directions.** Always and Off exist for
+  when it is.
 - **No result caching.** Asking the same question twice costs two searches.
 - **Citation quality depends on the model.** The prompt asks for `[n]` markers;
   a weaker model may cite loosely or not at all.
@@ -102,7 +144,17 @@ results rather than failing, snippet truncation, limits, the four HTTP error
 classes, timeouts, the missing-key message, and the contributor's numbering,
 citation instruction, budget trimming and order.
 
+`backend/tests/test_search_intent.py` — 37 tests: twelve time-sensitive
+questions settled by pattern with the model call asserted *not* to happen, ten
+creative and code tasks skipped the same way, code blocks, the ambiguous middle
+reaching the classifier, lenient reading of YES, anything-but-yes meaning no, no
+classifier available, a failing classifier, and the reason naming the phrase
+that triggered it.
+
 ## Verified
 
-End to end against SerpAPI and ILMU: tool events rendered, five sources
-collected and persisted, and the answer cited them inline.
+End to end against SerpAPI and ILMU. "What is the current weather in KL?" on
+Auto searched on `mentions 'current'` and answered with live conditions;
+"Write me a haiku about lanterns" and "Explain recursion" did not search; "Who
+won the 2026 Malaysian general election?" and "What is the latest version of
+Python?" did.

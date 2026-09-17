@@ -16,8 +16,11 @@ class SendMessageRequest(BaseModel):
     # When set, re-answers the question above this assistant message instead of
     # adding a new turn. `content` is ignored.
     regenerate_of: UUID | None = None
-    # Run a web search before answering. Ignored when SERPAPI_KEY is unset.
-    use_search: bool = False
+    # auto  — decide per message whether the question needs current info
+    # always— search every message
+    # off   — never search
+    # Ignored entirely when SERPAPI_KEY is unset.
+    search_mode: Literal["auto", "always", "off"] = "auto"
 
 
 class FeedbackRequest(BaseModel):

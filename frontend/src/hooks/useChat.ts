@@ -12,6 +12,7 @@ import { readSse } from '@/lib/sse'
 
 export type Role = 'user' | 'assistant'
 export type Rating = 'up' | 'down'
+export type SearchMode = 'auto' | 'always' | 'off'
 
 export interface ChatMessage {
   id: string
@@ -104,7 +105,7 @@ interface StreamBody {
   conversation_id?: string | null
   content?: string
   regenerate_of?: string
-  use_search?: boolean
+  search_mode?: SearchMode
 }
 
 export interface UseChat {
@@ -118,7 +119,7 @@ export interface UseChat {
   totals: Totals | null
   currency: string
   suggestions: string[]
-  send: (content: string, options?: { useSearch?: boolean }) => Promise<void>
+  send: (content: string, options?: { searchMode?: SearchMode }) => Promise<void>
   regenerate: (assistantMessageId: string) => Promise<void>
   rate: (messageId: string, rating: Rating | null, reason?: string) => void
   stop: () => void
@@ -362,7 +363,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   )
 
   const send = useCallback(
-    async (content: string, options?: { useSearch?: boolean }) => {
+    async (content: string, options?: { searchMode?: SearchMode }) => {
       const trimmed = content.trim()
       if (!trimmed || streaming) return
 
@@ -388,7 +389,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         {
           conversation_id: conversationId,
           content: trimmed,
-          use_search: options?.useSearch ?? false,
+          search_mode: options?.searchMode ?? 'auto',
         },
         (start) => {
           setMessages((current) => [

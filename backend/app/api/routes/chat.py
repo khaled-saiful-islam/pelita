@@ -135,7 +135,7 @@ async def stream(
                 conversation_id=payload.conversation_id,
                 content=payload.content,
                 regenerate_of=payload.regenerate_of,
-                use_search=payload.use_search,
+                search_mode=payload.search_mode,
             ):
                 frame = _to_sse(event)
                 if frame is not None:
