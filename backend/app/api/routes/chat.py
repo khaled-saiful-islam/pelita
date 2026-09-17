@@ -19,7 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.deps import ChatServiceDep, CurrentUser, SessionDep
 from app.api.schemas.chat import FeedbackRequest, FeedbackResponse, SendMessageRequest
 from app.core.errors import PelitaError
-from app.services.chat_service import (
+from app.services.events import (
     AccountingEvent,
     DeltaEvent,
     DoneEvent,

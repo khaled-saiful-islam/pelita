@@ -25,8 +25,8 @@ from app.providers.registry import build_provider
 from app.services.accounting_service import Pricing
 from app.services.auth_service import AuthService
 from app.services.cancellation import registry as cancellation_registry
-from app.services.chat_service import ChatService
-from app.tools.serpapi import SerpApiSearch
+from app.services.chat_service import ChatService, TurnSettings
+from app.tools.registry import build_tools
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -80,39 +80,31 @@ CurrentUser = Annotated[User, Depends(current_user)]
 
 
 def get_chat_service(settings: SettingsDep) -> ChatService:
-    """Built per request, but cheap: the provider holds no connection pool and
-    contributors are stateless."""
+    """Built per request, but cheap: the provider holds no connection pool,
+    contributors are stateless, and tools are thin wrappers."""
     return ChatService(
         session_maker=session_scope,
         provider=build_provider(settings),
         contributor_factory=lambda memories: build_contributors(settings, memories=memories),
         cancellation=cancellation_registry,
-        budget=TokenBudget(
-            memory=settings.memory_token_budget,
-            tools=settings.tools_token_budget,
-            history=settings.history_token_budget,
-        ),
-        max_tokens=settings.llm_max_tokens,
-        temperature=settings.llm_temperature,
-        pricing=Pricing.from_settings(settings),
-        supported_languages=settings.supported_language_list,
-        default_language=settings.default_language,
-        # None when no key is configured, so the toggle simply does nothing
-        # rather than failing every search.
-        search=(
-            SerpApiSearch(
-                api_key=settings.serpapi_key, base_url=settings.serpapi_base_url
-            )
-            if settings.search_enabled
-            else None
-        ),
+        tools=build_tools(settings),
         guards=build_guards(settings),
-        search_limit=settings.search_max_results,
-        image_limit=settings.image_max_results,
-        suggestions_enabled=settings.suggestions_enabled,
-        suggestions_count=settings.suggestions_count,
-        memory_auto_extract=settings.memory_auto_extract,
-        memory_max_per_user=settings.memory_max_per_user,
+        settings=TurnSettings(
+            budget=TokenBudget(
+                memory=settings.memory_token_budget,
+                tools=settings.tools_token_budget,
+                history=settings.history_token_budget,
+            ),
+            pricing=Pricing.from_settings(settings),
+            max_tokens=settings.llm_max_tokens,
+            temperature=settings.llm_temperature,
+            supported_languages=tuple(settings.supported_language_list),
+            default_language=settings.default_language,
+            suggestions_enabled=settings.suggestions_enabled,
+            suggestions_count=settings.suggestions_count,
+            memory_auto_extract=settings.memory_auto_extract,
+            memory_max_per_user=settings.memory_max_per_user,
+        ),
     )
 
 

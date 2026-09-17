@@ -39,9 +39,9 @@ from app.providers.base import (
 )
 from app.services.accounting_service import Pricing
 from app.services.cancellation import CancellationRegistry
-from app.services.chat_service import (
+from app.services.chat_service import ChatService, TurnSettings
+from app.services.events import (
     AccountingEvent,
-    ChatService,
     DeltaEvent,
     DoneEvent,
     ErrorEvent,
@@ -84,6 +84,7 @@ def build_service(
     memories_in_prompt: bool = False,
     suggestions: bool = False,
     extract: bool = False,
+    tools: dict | None = None,
 ) -> ChatService:
     @asynccontextmanager
     async def session_maker():
@@ -104,25 +105,23 @@ def build_service(
         provider=provider,
         contributor_factory=contributors,
         cancellation=registry,
-        budget=TokenBudget(memory=256, tools=512, history=1024),
-        max_tokens=256,
-        temperature=0.5,
-        pricing=Pricing(
-            input_per_1m=Decimal("0.15"), output_per_1m=Decimal("0.60"), currency="USD"
+        tools=tools,
+        settings=TurnSettings(
+            budget=TokenBudget(memory=256, tools=512, history=1024),
+            pricing=Pricing(
+                input_per_1m=Decimal("0.15"), output_per_1m=Decimal("0.60"), currency="USD"
+            ),
+            max_tokens=256,
+            temperature=0.5,
+            supported_languages=("en", "ms", "ta", "zh", "bn"),
+            default_language="en",
+            # Off by default so most tests exercise one provider call and assert
+            # on the turn rather than on the follow-up work that trails it.
+            suggestions_enabled=suggestions,
+            memory_auto_extract=extract,
+            memory_max_per_user=100,
         ),
-        supported_languages=["en", "ms", "ta", "zh", "bn"],
-        default_language="en",
-        # Off by default so most tests exercise one provider call and assert on
-        # the turn rather than on the follow-up work that trails it.
-        suggestions_enabled=suggestions,
-        memory_auto_extract=extract,
-        memory_max_per_user=100,
     )
-
-
-@pytest.fixture
-def registry() -> CancellationRegistry:
-    return CancellationRegistry()
 
 
 async def collect(service, **kwargs):

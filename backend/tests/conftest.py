@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.db.models.user import User
+from app.services.cancellation import CancellationRegistry
 
 
 @pytest.fixture(scope="session")
@@ -61,3 +62,9 @@ async def db_user(session: AsyncSession) -> User:
     session.add(user)
     await session.flush()
     return user
+
+
+@pytest.fixture
+def registry() -> CancellationRegistry:
+    """A fresh cancellation registry per test, so one turn cannot cancel another."""
+    return CancellationRegistry()

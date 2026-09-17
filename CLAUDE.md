@@ -42,7 +42,8 @@ have designed it wrong — pass the values in.
 | Model backends | `providers/base.py` | `providers/registry.py` |
 | Guards | `guards/base.py` | `guards/registry.py` |
 | Prompt sources | `context/base.py` | `context/registry.py` |
-| Search backends | `tools/serpapi.py` | built in `api/deps.py` |
+| Tools | `tools/base.py` | `tools/registry.py` |
+| Search backends | `tools/serpapi.py` | used by the tools above |
 
 Adding one is a new file plus one registry line. If your change requires editing
 three existing files, stop and ask whether the seam is in the wrong place.
@@ -145,27 +146,64 @@ frontend switch.
 `done` is always last. `usage` always arrives, including on cancellation and
 error, because those tokens were still paid for.
 
+## A turn has four phases
+
+`ChatService.stream_turn` is deliberately short. It calls four phases, each of
+which yields events and records into a mutable `TurnState`:
+
+```
+_open      persist the question, reserve a row for the answer
+_prepare   guards, tool selection, tool execution
+_generate  assemble the prompt and stream the model
+_close     persist what arrived; then _follow_up for suggestions and memory
+```
+
+No function in `app/` exceeds 50 lines. Keep it that way — if a phase is growing,
+it wants splitting, not another `if`.
+
+## Adding a tool
+
+Implement `Tool` (`tools/base.py`) and add one line to `tools/registry.py`:
+
+```python
+class WeatherTool(Tool):
+    name = "weather"
+    description = "Look up the current weather somewhere."   # a model reads this
+    parameters = text_parameter("query", "Where to look up the weather")
+    presentation = ToolPresentation(
+        running="Checking the weather", done="Checked the weather", noun="reading"
+    )
+    async def run(self, **kwargs) -> Sequence[ToolResult]: ...
+```
+
+`ChatService` never names a tool except in `_select_tool`, which is the single
+place selection happens. `backend/tests/test_tool_protocol.py` adds a tool the
+codebase has never heard of and asserts it runs, labels itself and fails
+gracefully — so the claim is checked, not asserted.
+
+**For agent/tool-calling work:** `description` and `parameters` exist so a model
+can be handed the tool list and choose. Replace `_select_tool` with that choice,
+and make `_prepare`/`_generate` loop until the model stops asking. Nothing else
+in the turn needs to change.
+
+Results with a `thumbnail_url` render as an image grid; results without render
+as citations. That is decided by shape, not by tool name, so a new tool that
+returns pictures gets the grid for free.
+
 ## Known weak points
 
 Be honest about these rather than discovering them:
 
-- **`chat_service.py` is too big** (671 lines, `stream_turn` is 184). It
-  orchestrates guards, search, images, context, streaming, accounting,
-  suggestions and memory in one linear function. It wants a turn-step pipeline
-  the way the prompt has a contributor pipeline. **This is the first thing to fix
-  before adding agent/tool-calling features** — an agent loop cannot be bolted
-  onto a strictly linear function.
-- **There is no `Tool` protocol.** Search and news are called directly by name.
-  Anything agentic needs tools to be enumerable and callable by the model, not
-  pre-fetched by the service.
-- **`useChat.ts` is 525 lines** with a ten-case switch — the same shape on the
-  frontend.
+- **`useChat.ts` is ~525 lines** with a ten-case switch — the frontend has the
+  god-object shape the backend just shed.
 - **JSON-array-from-model-prose parsing is duplicated** in `suggestion_service`
   and `memory_service`.
 - **One API worker.** `CancellationRegistry` is in-process, so `--workers 2`
   silently breaks the stop button.
 - **Pattern layers are English-only** — search intent, image intent, and the
   injection guard.
+- **One tool per turn.** `_select_tool` returns a single tool; running several,
+  or the same one repeatedly, is the agent-loop change described above.
 
 ## Things that will look wrong but are deliberate
 

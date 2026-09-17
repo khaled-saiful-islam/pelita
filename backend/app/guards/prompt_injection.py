@@ -123,23 +123,7 @@ class PromptInjectionGuard:
             # person who can see the same text.
             sanitized = INVISIBLE.sub("", sanitized)
 
-        for rule, pattern, base in (
-            ("fake_delimiters", FAKE_DELIMITERS, Severity.HIGH),
-            ("instruction_override", INSTRUCTION_OVERRIDE, Severity.HIGH),
-            ("instruction_reset", INSTRUCTION_RESET, Severity.HIGH),
-            ("role_hijack", ROLE_HIJACK, Severity.MEDIUM),
-            ("system_prompt_exfiltration", EXFILTRATION, Severity.MEDIUM),
-            ("opaque_blob", OPAQUE_BLOB, Severity.LOW),
-        ):
-            match = pattern.search(probe)
-            if match:
-                findings.append(
-                    Finding(
-                        rule=rule,
-                        severity=_weigh(rule, base, source),
-                        evidence=_evidence(match.group(0)),
-                    )
-                )
+        findings.extend(_match_rules(probe, source))
 
         if not findings:
             return GuardVerdict.clean(text, source)
@@ -160,6 +144,33 @@ class PromptInjectionGuard:
             sanitized=sanitized,
             source=source,
         )
+
+
+# Rule name, pattern, and the weight it carries when the text is untrusted.
+RULES: tuple[tuple[str, re.Pattern[str], Severity], ...] = (
+    ("fake_delimiters", FAKE_DELIMITERS, Severity.HIGH),
+    ("instruction_override", INSTRUCTION_OVERRIDE, Severity.HIGH),
+    ("instruction_reset", INSTRUCTION_RESET, Severity.HIGH),
+    ("role_hijack", ROLE_HIJACK, Severity.MEDIUM),
+    ("system_prompt_exfiltration", EXFILTRATION, Severity.MEDIUM),
+    ("opaque_blob", OPAQUE_BLOB, Severity.LOW),
+)
+
+
+def _match_rules(probe: str, source: ContentSource) -> list[Finding]:
+    """Every rule that fires, weighted for where the text came from."""
+    found: list[Finding] = []
+    for rule, pattern, base in RULES:
+        match = pattern.search(probe)
+        if match:
+            found.append(
+                Finding(
+                    rule=rule,
+                    severity=_weigh(rule, base, source),
+                    evidence=_evidence(match.group(0)),
+                )
+            )
+    return found
 
 
 def _weigh(rule: str, base: Severity, source: ContentSource) -> Severity:

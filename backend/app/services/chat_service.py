@@ -1,20 +1,29 @@
 """The chat turn.
 
-Orchestrates: persist the question, assemble the prompt from context
-contributors, stream the answer, and persist whatever arrived — including when
-the user stops it half way.
+Four phases, in order:
+
+    open      persist the question, reserve a row for the answer
+    prepare   guards, tool selection, tool execution
+    generate  assemble the prompt and stream the model
+    close     persist what arrived, then suggestions and memory
+
+Each phase is a small method that yields events and records into `TurnState`.
+That shape is deliberate. Today a pattern picks the tool; when a model picks it
+instead, only `_select_tool` changes. An agent loop becomes "run prepare and
+generate until the model stops asking for tools" rather than a rewrite.
 
 Transactions are short and explicit. A streaming response can stay open for
-minutes, and holding a database transaction open for that long would pin a
-connection and block migrations for as long as someone is reading an answer.
+minutes, and holding a database transaction that long would pin a connection and
+block migrations for as long as someone is reading an answer.
 """
 
 from __future__ import annotations
 
 import logging
+from asyncio import Event
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import perf_counter
 from uuid import UUID
 
@@ -29,6 +38,7 @@ from app.db.models.source import MessageSource
 from app.db.repositories.conversations import SqlConversationRepository
 from app.guards.base import ContentSource, Guard, GuardVerdict
 from app.providers.base import (
+    ChatMessage,
     ChatRequest,
     FinishReason,
     LLMProvider,
@@ -43,11 +53,24 @@ from app.providers.base import (
 from app.providers.base import UsageEvent as ProviderUsageEvent
 from app.services.accounting_service import Accounting, Pricing, price
 from app.services.cancellation import CancellationRegistry
+from app.services.events import (
+    AccountingEvent,
+    ChatEvent,
+    DeltaEvent,
+    DoneEvent,
+    ErrorEvent,
+    ImagesEvent,
+    SourcesEvent,
+    StartEvent,
+    SuggestionsEvent,
+    ToolEvent,
+    guard_payload,
+)
 from app.services.language_service import detect_language
 from app.services.memory_service import MemoryService
 from app.services.search_intent import SearchDecision, decide
 from app.services.suggestion_service import suggest
-from app.tools.serpapi import SearchProvider, SearchUnavailable
+from app.tools.base import Tool, ToolUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -61,103 +84,52 @@ SessionMaker = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 ContributorFactory = Callable[[tuple[str, ...]], tuple[ContextContributor, ...]]
 
 
-# --- events surfaced to the API layer -----------------------------------
-
-
 @dataclass(frozen=True, slots=True)
-class StartEvent:
-    conversation_id: UUID
-    user_message_id: UUID
-    assistant_message_id: UUID
-    title: str
+class TurnSettings:
+    """Everything a turn reads from configuration.
+
+    Grouped so the service takes a handful of collaborators rather than a
+    parameter list nobody can hold in their head.
+    """
+
+    budget: TokenBudget
+    pricing: Pricing
+    max_tokens: int = 2048
+    temperature: float = 0.7
+    supported_languages: tuple[str, ...] = ("en",)
+    default_language: str = "en"
+    suggestions_enabled: bool = True
+    suggestions_count: int = 3
+    memory_auto_extract: bool = True
+    memory_max_per_user: int = 100
+
+
+@dataclass(slots=True)
+class TurnState:
+    """What the turn accumulates as it runs.
+
+    The one mutable thing in the flow, on purpose: everything crossing a
+    boundary is frozen, and this is the accumulator the phases write into.
+    """
+
+    question: str
+    history: tuple[StoredMessage, ...] = ()
     language: str | None = None
+    tool_results: tuple[ToolResult, ...] = ()
+    image_results: tuple[ToolResult, ...] = ()
+    prompt: tuple[ChatMessage, ...] = ()
+    chunks: list[str] = field(default_factory=list)
+    usage: Usage | None = None
+    finish: FinishReason = FinishReason.STOP
+    error: str | None = None
 
+    @property
+    def answer(self) -> str:
+        return "".join(self.chunks)
 
-@dataclass(frozen=True, slots=True)
-class DeltaEvent:
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class ToolEvent:
-    """Progress of a tool, so the UI can say what is happening and why the
-    first token is taking a moment."""
-
-    tool: str
-    status: str  # running | done | failed
-    label: str
-    detail: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class GuardEventPayload:
-    """A guard fired. Surfaced so the banner can explain itself rather than
-    silently altering what the model sees."""
-
-    source: str
-    severity: str
-    rules: tuple[str, ...]
-    evidence: str
-
-
-@dataclass(frozen=True, slots=True)
-class SourcesEvent:
-    sources: tuple[ToolResult, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ImagesEvent:
-    images: tuple[ToolResult, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class AccountingEvent:
-    accounting: Accounting
-
-
-@dataclass(frozen=True, slots=True)
-class SuggestionsEvent:
-    items: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class DoneEvent:
-    finish_reason: FinishReason
-
-
-@dataclass(frozen=True, slots=True)
-class ErrorEvent:
-    message: str
-
-
-ChatEvent = (
-    StartEvent
-    | ToolEvent
-    | GuardEventPayload
-    | SourcesEvent
-    | ImagesEvent
-    | DeltaEvent
-    | AccountingEvent
-    | SuggestionsEvent
-    | DoneEvent
-    | ErrorEvent
-)
-
-
-def _summarise(count: int, noun: str, started: float) -> str:
-    """"5 results in 1.2s" — the count alone does not say whether the wait was
-    the search or the model, which is the question when a turn feels slow."""
-    plural = "" if count == 1 else "s"
-    return f"{count} {noun}{plural} in {perf_counter() - started:.1f}s"
-
-
-def _guard_payload(verdict: GuardVerdict) -> GuardEventPayload:
-    return GuardEventPayload(
-        source=str(verdict.source),
-        severity=verdict.severity.label,
-        rules=verdict.rules,
-        evidence=verdict.findings[0].evidence if verdict.findings else "",
-    )
+    @property
+    def citations(self) -> tuple[ToolResult, ...]:
+        return (*self.tool_results, *self.image_results)
 
 
 def derive_title(text: str) -> str:
@@ -182,39 +154,17 @@ class ChatService:
         provider: LLMProvider,
         contributor_factory: ContributorFactory,
         cancellation: CancellationRegistry,
-        budget: TokenBudget,
-        max_tokens: int,
-        temperature: float,
-        pricing: Pricing,
-        supported_languages: list[str],
-        default_language: str,
-        search: SearchProvider | None = None,
-        search_limit: int = 5,
-        image_limit: int = 6,
+        settings: TurnSettings,
+        tools: dict[str, Tool] | None = None,
         guards: tuple[Guard, ...] = (),
-        suggestions_enabled: bool = True,
-        suggestions_count: int = 3,
-        memory_auto_extract: bool = True,
-        memory_max_per_user: int = 100,
     ) -> None:
         self._session_maker = session_maker
         self._provider = provider
         self._build_contributors = contributor_factory
         self._cancellation = cancellation
-        self._budget = budget
-        self._max_tokens = max_tokens
-        self._temperature = temperature
-        self._pricing = pricing
-        self._supported_languages = supported_languages
-        self._default_language = default_language
-        self._search = search
-        self._search_limit = search_limit
-        self._image_limit = image_limit
+        self._settings = settings
+        self._tools = tools or {}
         self._guards = guards
-        self._suggestions_enabled = suggestions_enabled
-        self._suggestions_count = suggestions_count
-        self._memory_auto_extract = memory_auto_extract
-        self._memory_max_per_user = memory_max_per_user
 
     # -- public ----------------------------------------------------------
 
@@ -227,182 +177,34 @@ class ChatService:
         regenerate_of: UUID | None = None,
         search_mode: str = "auto",
     ) -> AsyncIterator[ChatEvent]:
-        if regenerate_of is None:
-            content = content.strip()
-            if not content:
-                raise ValidationError("Message cannot be empty.")
-            if len(content) > MAX_MESSAGE_LENGTH:
-                raise ValidationError(
-                    f"Message is too long ({len(content)} characters, "
-                    f"limit {MAX_MESSAGE_LENGTH})."
-                )
-            start, history = await self._begin_turn(user_id, conversation_id, content)
-        else:
-            start, history, content = await self._begin_regeneration(user_id, regenerate_of)
+        start, state = await self._open(user_id, conversation_id, content, regenerate_of)
         yield start
 
         assistant_id = start.assistant_message_id
         cancel = self._cancellation.register(assistant_id)
-        collected: list[str] = []
-        finish = FinishReason.STOP
-        error: str | None = None
-        usage: Usage | None = None
-        request_messages: tuple = ()
-        tool_results: tuple[ToolResult, ...] = ()
-        image_results: tuple[ToolResult, ...] = ()
 
         try:
-            for verdict in self._scan(content, ContentSource.USER_INPUT):
-                yield _guard_payload(verdict)
-
-            tool_results: tuple[ToolResult, ...] = ()
-            image_results: tuple[ToolResult, ...] = ()
-            looking_for_images = False
-            decision = await self._should_search(search_mode, content)
-            if decision.needs_search and self._search is not None:
-                looking_for_images = decision.wants_images
-                yield ToolEvent(
-                    tool=self._search.name,
-                    status="running",
-                    label="Looking for images" if looking_for_images else "Searching the web",
-                    detail=decision.reason,
-                )
-                started = perf_counter()
-                try:
-                    if looking_for_images:
-                        images = await self._search.search_images(
-                            content, limit=self._image_limit
-                        )
-                        yield ToolEvent(
-                            tool=self._search.name,
-                            status="done",
-                            label="Found images",
-                            detail=_summarise(len(images), "image", started),
-                        )
-                        if images:
-                            yield ImagesEvent(images=tuple(images))
-                        # Images are shown, not read: they carry no text worth
-                        # putting in the prompt, so the model answers normally
-                        # while the grid renders alongside.
-                        image_results = tuple(images)
-
-                    # "Show me X" is answered by the pictures plus what the model
-                    # already knows. Running a text search as well doubles the
-                    # latency of the slowest part of the turn for prose nobody
-                    # asked for — and a second provider call is what pushed this
-                    # into a timeout whose failure chip then contradicted the
-                    # images that had just been found.
-                    found = (
-                        []
-                        if looking_for_images
-                        else await self._search.search(content, limit=self._search_limit)
-                    )
-                    # Scanned before the contributor sees them. Retrieved pages
-                    # are the realistic injection vector: nobody asked that page
-                    # for instructions.
-                    tool_results, verdicts = self._scan_results(found)
-                    for verdict in verdicts:
-                        yield _guard_payload(verdict)
-                    if not looking_for_images:
-                        yield ToolEvent(
-                            tool=self._search.name,
-                            status="done",
-                            label="Searched the web",
-                            detail=_summarise(len(found), "result", started),
-                        )
-                    if tool_results:
-                        yield SourcesEvent(sources=tool_results)
-                except SearchUnavailable as exc:
-                    # A failed search degrades the answer; it does not end the
-                    # turn. The model answers from what it knows and the UI says
-                    # search did not run.
-                    logger.info("search unavailable: %s", exc)
-                    yield ToolEvent(
-                        tool=self._search.name,
-                        status="failed",
-                        label="Search unavailable",
-                        detail=str(exc),
-                    )
-
-            turn = TurnContext(
-                conversation_id=start.conversation_id,
-                user_id=user_id,
-                user_message=content,
-                model=self._provider.info.model,
-                history=history,
-                budget=self._budget,
-                language=start.language,
-                tool_results=(*tool_results, *image_results),
-            )
-            memories = await self._memories_for(user_id)
-            messages, trace = await build_messages(turn, self._build_contributors(memories))
-            request_messages = messages
-            logger.info("prompt assembled for %s: %s", assistant_id, trace.as_dict())
-
-            request = ChatRequest(
-                messages=messages,
-                model=self._provider.info.model,
-                temperature=self._temperature,
-                max_tokens=self._max_tokens,
-                stream=True,
-            )
-
-            async for event in self._provider.stream_chat(request):
-                if cancel.is_set():
-                    finish = FinishReason.STOPPED
-                    break
-                if isinstance(event, TokenEvent):
-                    collected.append(event.text)
-                    yield DeltaEvent(text=event.text)
-                elif isinstance(event, ProviderUsageEvent):
-                    usage = event.usage
-
+            async for event in self._prepare(state, search_mode):
+                yield event
+            async for event in self._generate(state, start, user_id, cancel):
+                yield event
         except ProviderError as exc:
-            finish = FinishReason.ERROR
-            error = exc.message
+            state.finish, state.error = FinishReason.ERROR, exc.message
             logger.warning("provider failed during turn %s: %s", assistant_id, exc.message)
         except Exception:
-            finish = FinishReason.ERROR
-            error = "Something went wrong generating the response."
+            state.finish = FinishReason.ERROR
+            state.error = "Something went wrong generating the response."
             logger.exception("unexpected failure during turn %s", assistant_id)
         finally:
             self._cancellation.release(assistant_id)
-            # A cancelled or failed turn still consumed tokens, so it is still
-            # priced. Usage the provider never sent is estimated instead.
-            accounting = price(
-                usage or self._estimate(request_messages, collected), self._pricing
-            )
-            # Persist whatever arrived, even on error or cancellation. A partial
-            # answer the user watched appear should still be there on reload.
-            await self._finish_turn(
-                assistant_id,
-                "".join(collected),
-                finish,
-                accounting,
-                (*tool_results, *image_results),
-            )
+            accounting = await self._close(assistant_id, state)
 
         yield AccountingEvent(accounting=accounting)
-
-        answer = "".join(collected)
-        # Only after a clean finish. Suggesting follow-ups to a half-written or
-        # failed answer wastes a call and reads as the app not noticing.
-        if self._suggestions_enabled and finish is FinishReason.STOP and answer.strip():
-            items = await suggest(
-                self._provider,
-                user_message=content,
-                assistant_message=answer,
-                count=self._suggestions_count,
-            )
-            if items:
-                yield SuggestionsEvent(items=tuple(items))
-
-        if self._memory_auto_extract and finish is FinishReason.STOP and answer.strip():
-            await self._extract_memories(user_id, content, answer)
-
-        if error is not None:
-            yield ErrorEvent(message=error)
-        yield DoneEvent(finish_reason=finish)
+        async for event in self._follow_up(state, user_id):
+            yield event
+        if state.error is not None:
+            yield ErrorEvent(message=state.error)
+        yield DoneEvent(finish_reason=state.finish)
 
     async def stop(self, *, user_id: UUID, message_id: UUID) -> bool:
         """Cancel an in-flight response. Ownership is checked first."""
@@ -411,24 +213,203 @@ class ChatService:
             message = await repo.get_message(message_id)
             if message is None:
                 raise NotFoundError("No such message.")
-            conversation = await repo.get(message.conversation_id, user_id)
-            if conversation is None:
+            if await repo.get(message.conversation_id, user_id) is None:
                 raise NotFoundError("No such message.")
         return self._cancellation.cancel(message_id)
 
-    # -- internals -------------------------------------------------------
+    # -- phase 1: open ---------------------------------------------------
 
-    async def _should_search(self, mode: str, content: str) -> SearchDecision:
-        """Resolve the three-state mode into a yes or no.
+    async def _open(
+        self,
+        user_id: UUID,
+        conversation_id: UUID | None,
+        content: str,
+        regenerate_of: UUID | None,
+    ) -> tuple[StartEvent, TurnState]:
+        if regenerate_of is not None:
+            return await self._begin_regeneration(user_id, regenerate_of)
 
-        `always` still goes through here so that a missing SERPAPI_KEY is a
-        no-op rather than an error the user has to understand.
+        content = content.strip()
+        if not content:
+            raise ValidationError("Message cannot be empty.")
+        if len(content) > MAX_MESSAGE_LENGTH:
+            raise ValidationError(
+                f"Message is too long ({len(content)} characters, "
+                f"limit {MAX_MESSAGE_LENGTH})."
+            )
+        return await self._begin_turn(user_id, conversation_id, content)
+
+    # -- phase 2: prepare ------------------------------------------------
+
+    async def _prepare(self, state: TurnState, search_mode: str) -> AsyncIterator[ChatEvent]:
+        """Guards, then whichever tool the turn calls for."""
+        for verdict in self._scan(state.question, ContentSource.USER_INPUT):
+            yield guard_payload(verdict)
+
+        decision = await self._should_search(search_mode, state.question)
+        tool = self._select_tool(decision)
+        if tool is None:
+            return
+
+        async for event in self._run_tool(tool, state, decision):
+            yield event
+
+    def _select_tool(self, decision: SearchDecision) -> Tool | None:
+        """The only place a tool is chosen.
+
+        Replace this with a model doing the choosing and everything around it
+        still works, which is the whole reason tools have a protocol.
         """
-        if self._search is None or mode == "off":
-            return SearchDecision(False, "search off")
-        if mode == "always":
-            return SearchDecision(True, "search always on")
-        return await decide(content, provider=self._provider)
+        if not decision.needs_search:
+            return None
+        return self._tools.get("image_search" if decision.wants_images else "web_search")
+
+    async def _run_tool(
+        self, tool: Tool, state: TurnState, decision: SearchDecision
+    ) -> AsyncIterator[ChatEvent]:
+        yield ToolEvent(
+            tool=tool.name,
+            status="running",
+            label=tool.presentation.running,
+            detail=decision.reason,
+        )
+
+        started = perf_counter()
+        try:
+            found = tuple(await tool.run(query=state.question))
+        except ToolUnavailable as exc:
+            # A failed tool degrades the answer; it does not end the turn. The
+            # model answers from what it knows and the UI says what was missed.
+            logger.info("tool %s unavailable: %s", tool.name, exc)
+            yield ToolEvent(
+                tool=tool.name, status="failed", label="Search unavailable", detail=str(exc)
+            )
+            return
+
+        yield ToolEvent(
+            tool=tool.name,
+            status="done",
+            label=tool.presentation.done,
+            detail=_summarise(len(found), tool.presentation.noun, started),
+        )
+
+        if any(result.is_image for result in found):
+            state.image_results = found
+            yield ImagesEvent(images=found)
+            return
+
+        # Retrieved pages are the realistic injection vector: nobody asked that
+        # page for instructions. Scanned before any contributor sees them.
+        state.tool_results, verdicts = self._scan_results(found)
+        for verdict in verdicts:
+            yield guard_payload(verdict)
+        if state.tool_results:
+            yield SourcesEvent(sources=state.tool_results)
+
+    # -- phase 3: generate -----------------------------------------------
+
+    async def _generate(
+        self, state: TurnState, start: StartEvent, user_id: UUID, cancel: Event
+    ) -> AsyncIterator[ChatEvent]:
+        memories = await self._memories_for(user_id)
+        turn = TurnContext(
+            conversation_id=start.conversation_id,
+            user_id=user_id,
+            user_message=state.question,
+            model=self._provider.info.model,
+            history=state.history,
+            budget=self._settings.budget,
+            language=state.language,
+            tool_results=state.citations,
+        )
+        state.prompt, trace = await build_messages(turn, self._build_contributors(memories))
+        logger.info("prompt assembled for %s: %s", start.assistant_message_id, trace.as_dict())
+
+        request = ChatRequest(
+            messages=state.prompt,
+            model=self._provider.info.model,
+            temperature=self._settings.temperature,
+            max_tokens=self._settings.max_tokens,
+            stream=True,
+        )
+
+        async for event in self._provider.stream_chat(request):
+            if cancel.is_set():
+                state.finish = FinishReason.STOPPED
+                break
+            if isinstance(event, TokenEvent):
+                state.chunks.append(event.text)
+                yield DeltaEvent(text=event.text)
+            elif isinstance(event, ProviderUsageEvent):
+                state.usage = event.usage
+
+    # -- phase 4: close --------------------------------------------------
+
+    async def _close(self, assistant_id: UUID, state: TurnState) -> Accounting:
+        """Persist whatever arrived, however the turn ended.
+
+        A cancelled or failed turn still consumed tokens, so it is still priced,
+        and a partial answer the user watched appear should still be there on
+        reload.
+        """
+        accounting = price(state.usage or self._estimate(state), self._settings.pricing)
+
+        async with self._session_maker() as session:
+            message = await SqlConversationRepository(session).get_message(assistant_id)
+            if message is None:  # pragma: no cover - only if deleted mid-stream
+                logger.warning("assistant message %s vanished before persist", assistant_id)
+                return accounting
+
+            message.content = state.answer
+            message.finish_reason = state.finish
+            message.prompt_tokens = accounting.prompt_tokens
+            message.completion_tokens = accounting.completion_tokens
+            message.cost = accounting.cost
+            message.usage_source = str(accounting.source)
+
+            if state.citations:
+                # Replaced wholesale, so regenerating does not accumulate
+                # citations from the previous attempt.
+                message.sources = [
+                    MessageSource(
+                        message_id=message.id,
+                        tool=source.tool,
+                        title=source.title[:500],
+                        url=source.url,
+                        snippet=source.snippet,
+                        rank=source.rank,
+                        thumbnail_url=source.thumbnail_url or None,
+                        image_url=source.image_url or None,
+                    )
+                    for source in state.citations
+                ]
+
+        return accounting
+
+    async def _follow_up(self, state: TurnState, user_id: UUID) -> AsyncIterator[ChatEvent]:
+        """Suggestions and memory extraction, only after a clean finish.
+
+        Following up on a half-written answer wastes a call and reads as the app
+        not noticing it was stopped; learning from one means learning from
+        something the user did not accept.
+        """
+        if state.finish is not FinishReason.STOP or not state.answer.strip():
+            return
+
+        if self._settings.suggestions_enabled:
+            items = await suggest(
+                self._provider,
+                user_message=state.question,
+                assistant_message=state.answer,
+                count=self._settings.suggestions_count,
+            )
+            if items:
+                yield SuggestionsEvent(items=tuple(items))
+
+        if self._settings.memory_auto_extract:
+            await self._extract_memories(user_id, state.question, state.answer)
+
+    # -- guards ----------------------------------------------------------
 
     def _scan(self, text: str, source: ContentSource) -> list[GuardVerdict]:
         """Run every guard over one piece of text, returning only what fired."""
@@ -440,46 +421,65 @@ class ChatService:
                 logger.exception("guard %r failed on %s", getattr(guard, "name", guard), source)
                 continue
             if verdict.flagged:
-                logger.info(
-                    "guard %s fired on %s: %s", guard.name, source.value, verdict.rules
-                )
+                logger.info("guard %s fired on %s: %s", guard.name, source.value, verdict.rules)
                 flagged.append(verdict)
         return flagged
 
     def _scan_results(
-        self, results: list[ToolResult]
+        self, results: tuple[ToolResult, ...]
     ) -> tuple[tuple[ToolResult, ...], list[GuardVerdict]]:
         """Sanitise tool output, keeping the cleaned text for the prompt.
 
-        The original title and url are preserved for the source list — a
-        citation should still be clickable even when its page misbehaved.
+        Title and url are preserved: a citation should still be clickable even
+        when its page misbehaved.
         """
         cleaned: list[ToolResult] = []
         verdicts: list[GuardVerdict] = []
 
         for result in results:
             found = self._scan(result.snippet, ContentSource.WEB_SEARCH)
-            snippet = result.snippet
-            for verdict in found:
-                snippet = verdict.sanitized
             verdicts.extend(found)
             cleaned.append(
                 ToolResult(
                     tool=result.tool,
                     title=result.title,
                     url=result.url,
-                    snippet=snippet,
+                    snippet=found[-1].sanitized if found else result.snippet,
                     rank=result.rank,
                 )
             )
         return tuple(cleaned), verdicts
 
+    # -- helpers ---------------------------------------------------------
+
+    async def _should_search(self, mode: str, content: str) -> SearchDecision:
+        """Resolve the three-state mode into a decision.
+
+        `always` still goes through here so a missing key is a no-op rather than
+        an error the user has to understand.
+        """
+        if not self._tools or mode == "off":
+            return SearchDecision(False, "search off")
+        if mode == "always":
+            return SearchDecision(True, "search always on")
+        return await decide(content, provider=self._provider)
+
+    def _estimate(self, state: TurnState) -> Usage:
+        """Count tokens ourselves when the provider did not report any."""
+        model = self._provider.info.model
+        return Usage(
+            prompt_tokens=count_message_tokens(state.prompt, model),
+            completion_tokens=count_tokens(state.answer, model),
+            source=UsageSource.ESTIMATED,
+        )
+
     async def _memories_for(self, user_id: UUID) -> tuple[str, ...]:
         """Enabled facts, newest first. Never raises."""
         try:
             async with self._session_maker() as session:
-                service = MemoryService(session, max_per_user=self._memory_max_per_user)
-                found = await service.list_for(user_id, enabled_only=True)
+                found = await MemoryService(
+                    session, max_per_user=self._settings.memory_max_per_user
+                ).list_for(user_id, enabled_only=True)
                 return tuple(m.content for m in found)
         except Exception:  # noqa: BLE001 - losing memory degrades, never breaks
             logger.exception("could not load memories for %s", user_id)
@@ -489,7 +489,9 @@ class ChatService:
         """Propose and store new facts. Never raises, never duplicates."""
         try:
             async with self._session_maker() as session:
-                service = MemoryService(session, max_per_user=self._memory_max_per_user)
+                service = MemoryService(
+                    session, max_per_user=self._settings.memory_max_per_user
+                )
                 facts = await service.extract(
                     self._provider, user_message=question, assistant_message=answer
                 )
@@ -504,52 +506,24 @@ class ChatService:
         except Exception:  # noqa: BLE001 - extraction is best-effort
             logger.exception("memory extraction failed for %s", user_id)
 
-    def _estimate(self, messages: tuple, collected: list[str]) -> Usage:
-        """Count tokens ourselves when the provider did not report any."""
-        return Usage(
-            prompt_tokens=count_message_tokens(messages, self._provider.info.model),
-            completion_tokens=count_tokens("".join(collected), self._provider.info.model),
-            source=UsageSource.ESTIMATED,
-        )
+    # -- persistence -----------------------------------------------------
 
     async def _begin_turn(
         self, user_id: UUID, conversation_id: UUID | None, content: str
-    ) -> tuple[StartEvent, tuple[StoredMessage, ...]]:
+    ) -> tuple[StartEvent, TurnState]:
         """Persist the question and reserve a row for the answer.
 
         The assistant row exists before a single token arrives so the stop
-        endpoint has something to address and a reload mid-stream finds the
-        turn rather than a gap.
+        endpoint has something to address and a reload mid-stream finds the turn
+        rather than a gap.
         """
         async with self._session_maker() as session:
             repo = SqlConversationRepository(session)
-
-            if conversation_id is None:
-                conversation = await repo.create(user_id, derive_title(content))
-            else:
-                found = await repo.get(conversation_id, user_id)
-                if found is None:
-                    raise NotFoundError("No such conversation.")
-                conversation = found
-                if conversation.title == "New chat":
-                    conversation.title = derive_title(content)
-
-            # Detected once, from the first message, then reused. Re-detecting
-            # every turn would make the reply language flip on a short "ok".
-            if conversation.language is None:
-                conversation.language = detect_language(
-                    content,
-                    supported=self._supported_languages,
-                    default=self._default_language,
-                )
-                logger.info(
-                    "conversation %s detected as %s", conversation.id, conversation.language
-                )
-
-            history = await repo.recent_messages(
-                conversation.id, limit=HISTORY_MESSAGE_LIMIT
+            conversation = await self._resolve_conversation(
+                repo, user_id, conversation_id, content
             )
 
+            history = await repo.recent_messages(conversation.id, limit=HISTORY_MESSAGE_LIMIT)
             user_message = await repo.add_message(
                 Message(conversation_id=conversation.id, role=Role.USER, content=content)
             )
@@ -570,20 +544,55 @@ class ChatService:
                 title=conversation.title,
                 language=conversation.language,
             )
-            stored = tuple(
-                StoredMessage(role=Role(m.role), content=m.content) for m in history
+            state = TurnState(
+                question=content,
+                history=tuple(
+                    StoredMessage(role=Role(m.role), content=m.content) for m in history
+                ),
+                language=conversation.language,
             )
 
-        return start, stored
+        return start, state
+
+    async def _resolve_conversation(
+        self,
+        repo: SqlConversationRepository,
+        user_id: UUID,
+        conversation_id: UUID | None,
+        content: str,
+    ) -> Conversation:
+        """Find or create the conversation, and settle its title and language."""
+        if conversation_id is None:
+            conversation = await repo.create(user_id, derive_title(content))
+        else:
+            found = await repo.get(conversation_id, user_id)
+            if found is None:
+                raise NotFoundError("No such conversation.")
+            conversation = found
+            if conversation.title == "New chat":
+                conversation.title = derive_title(content)
+
+        # Detected once, from the first message, then reused. Re-detecting every
+        # turn would make the reply language flip on a short "ok".
+        if conversation.language is None:
+            conversation.language = detect_language(
+                content,
+                supported=list(self._settings.supported_languages),
+                default=self._settings.default_language,
+            )
+            logger.info(
+                "conversation %s detected as %s", conversation.id, conversation.language
+            )
+        return conversation
 
     async def _begin_regeneration(
         self, user_id: UUID, assistant_message_id: UUID
-    ) -> tuple[StartEvent, tuple[StoredMessage, ...], str]:
+    ) -> tuple[StartEvent, TurnState]:
         """Clear an assistant message and re-answer the question above it.
 
-        Only the most recent assistant message can be regenerated. Regenerating
-        an earlier one would orphan every exchange after it, and silently
-        deleting a conversation's tail is not something a button should do.
+        Only the most recent answer can be regenerated. Redoing an earlier one
+        would orphan every exchange after it, and silently deleting a
+        conversation's tail is not something a button should do.
         """
         async with self._session_maker() as session:
             repo = SqlConversationRepository(session)
@@ -619,46 +628,18 @@ class ChatService:
                 title=conversation.title,
                 language=conversation.language,
             )
+            state = TurnState(
+                question=question, history=history, language=conversation.language
+            )
 
-        return start, history, question
+        return start, state
 
-    async def _finish_turn(
-        self,
-        assistant_id: UUID,
-        content: str,
-        finish: FinishReason,
-        accounting: Accounting,
-        sources: tuple[ToolResult, ...] = (),
-    ) -> None:
-        async with self._session_maker() as session:
-            repo = SqlConversationRepository(session)
-            message = await repo.get_message(assistant_id)
-            if message is None:  # pragma: no cover - only if deleted mid-stream
-                logger.warning("assistant message %s vanished before persist", assistant_id)
-                return
-            message.content = content
-            message.finish_reason = finish
-            message.prompt_tokens = accounting.prompt_tokens
-            message.completion_tokens = accounting.completion_tokens
-            message.cost = accounting.cost
-            message.usage_source = str(accounting.source)
 
-            if sources:
-                # Replaced wholesale, so regenerating with search on does not
-                # accumulate citations from the previous attempt.
-                message.sources = [
-                    MessageSource(
-                        message_id=message.id,
-                        tool=source.tool,
-                        title=source.title[:500],
-                        url=source.url,
-                        snippet=source.snippet,
-                        rank=source.rank,
-                        thumbnail_url=source.thumbnail_url or None,
-                        image_url=source.image_url or None,
-                    )
-                    for source in sources
-                ]
+def _summarise(count: int, noun: str, started: float) -> str:
+    """"5 results in 1.2s" — the count alone does not say whether the wait was
+    the search or the model, which is the question when a turn feels slow."""
+    plural = "" if count == 1 else "s"
+    return f"{count} {noun}{plural} in {perf_counter() - started:.1f}s"
 
 
 async def list_conversations(
