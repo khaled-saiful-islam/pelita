@@ -140,8 +140,12 @@ start · guard · tool · images · sources · token · usage · suggestions · 
 ```
 
 Adding an event type is additive — a client that does not recognise one ignores
-it. Add a dataclass in `chat_service.py`, a case in `_to_sse`, and a case in the
-frontend switch.
+it. Add a dataclass in `services/events.py`, a case in `_to_sse`, and a case in
+`lib/chat-events.ts` plus a handler in `useChat`.
+
+On the frontend the wire format lives in `lib/chat-events.ts`, the shapes in
+`lib/chat-types.ts`, and `useChat` says only what each event *means* for the
+conversation.
 
 `done` is always last. `usage` always arrives, including on cancellation and
 error, because those tokens were still paid for.
@@ -194,10 +198,6 @@ returns pictures gets the grid for free.
 
 Be honest about these rather than discovering them:
 
-- **`useChat.ts` is ~525 lines** with a ten-case switch — the frontend has the
-  god-object shape the backend just shed.
-- **JSON-array-from-model-prose parsing is duplicated** in `suggestion_service`
-  and `memory_service`.
 - **One API worker.** `CancellationRegistry` is in-process, so `--workers 2`
   silently breaks the stop button.
 - **Pattern layers are English-only** — search intent, image intent, and the

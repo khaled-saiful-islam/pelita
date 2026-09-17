@@ -8,9 +8,9 @@ nothing either.
 
 from __future__ import annotations
 
-import json
 import logging
 
+from app.core.model_output import parse_string_array
 from app.providers.base import ChatMessage, ChatRequest, LLMProvider, Role
 
 logger = logging.getLogger(__name__)
@@ -69,34 +69,7 @@ async def suggest(
 
 
 def parse_suggestions(raw: str, *, count: int) -> list[str]:
-    """Locate a JSON array in the response and clean it up.
-
-    Models wrap JSON in prose and fences however they like, so the array is
-    found rather than assumed, and anything unparseable yields no chips.
-    """
-    text = raw.strip()
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end <= start:
-        return []
-
-    try:
-        parsed = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(parsed, list):
-        return []
-
-    seen: set[str] = set()
-    out: list[str] = []
-    for item in parsed:
-        if not isinstance(item, str):
-            continue
-        cleaned = " ".join(item.split())[:MAX_SUGGESTION_LENGTH].strip()
-        key = cleaned.lower()
-        if not cleaned or key in seen:
-            continue
-        seen.add(key)
-        out.append(cleaned)
-        if len(out) >= count:
-            break
-    return out
+    """Chips, deduplicated — three near-identical suggestions are one chip."""
+    return parse_string_array(
+        raw, max_length=MAX_SUGGESTION_LENGTH, limit=count, dedupe=True
+    )

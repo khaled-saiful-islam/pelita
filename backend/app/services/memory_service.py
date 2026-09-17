@@ -7,7 +7,6 @@ cannot see or correct is a liability rather than a feature.
 
 from __future__ import annotations
 
-import json
 import logging
 from uuid import UUID
 
@@ -15,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
+from app.core.model_output import parse_string_array
 from app.db.models.memory import Memory
 from app.providers.base import ChatMessage, ChatRequest, LLMProvider, Role
 
@@ -136,29 +136,6 @@ def _validate(content: str) -> str:
 
 
 def parse_facts(raw: str) -> list[str]:
-    """Pull a JSON array of strings out of a model response.
-
-    Models wrap JSON in prose and fences however they like, so the array is
-    located rather than assumed. Anything unparseable yields nothing, which is
-    the safe direction for something that writes to a user's profile.
-    """
-    text = raw.strip()
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end <= start:
-        return []
-
-    try:
-        parsed = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(parsed, list):
-        return []
-
-    facts: list[str] = []
-    for item in parsed:
-        if not isinstance(item, str):
-            continue
-        cleaned = " ".join(item.split())[:MAX_CONTENT_LENGTH]
-        if cleaned:
-            facts.append(cleaned)
-    return facts
+    """Facts proposed by the model, cleaned. Duplicates are left in — `add`
+    checks those against what is already stored."""
+    return parse_string_array(raw, max_length=MAX_CONTENT_LENGTH)

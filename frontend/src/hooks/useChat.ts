@@ -1,127 +1,42 @@
 /**
  * Chat turn state.
  *
- * Holds the message list, drives the stream, and owns stopping, regenerating
- * and rating. The transport detail — that events arrive as SSE frames — stops
- * here; components see messages and a boolean.
+ * Owns the message list and the actions on it. The wire format lives in
+ * `lib/chat-events.ts` and the shapes in `lib/chat-types.ts`, so what is left
+ * here is what each event *means* for the conversation.
  */
 
 import { useCallback, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 import { readSse } from '@/lib/sse'
+import { addUsage, dispatchFrame, mergeTool } from '@/lib/chat-events'
 import { splitStoredSources } from '@/lib/messages'
+import type {
+  ChatMessage,
+  ConversationDetail,
+  FeedbackRecord,
+  GuardAlert,
+  Rating,
+  SearchMode,
+  StartPayload,
+  StreamBody,
+  ToolActivity,
+  Totals,
+} from '@/lib/chat-types'
 
-export type Role = 'user' | 'assistant'
-export type Rating = 'up' | 'down'
-export type SearchMode = 'auto' | 'always' | 'off'
-
-export interface ChatMessage {
-  id: string
-  role: Role
-  content: string
-  finish_reason: string | null
-  model: string | null
-  created_at: string
-  prompt_tokens: number
-  completion_tokens: number
-  cost: string | number
-  /** 'provider' when the model reported the counts, 'estimated' when we did. */
-  usage_source: string | null
-  sources?: Source[]
-  images?: ImageResult[]
-  /** What tools ran for this answer, in order. */
-  tools?: ToolActivity[]
-  /** Guard findings for this turn. */
-  guards?: GuardAlert[]
-  /** True only for the message currently being written. */
-  streaming?: boolean
-  error?: string | null
-}
-
-export interface Source {
-  rank: number
-  title: string
-  url: string
-  snippet: string
-  /** Set only on image-search results. */
-  thumbnail_url?: string | null
-  image_url?: string | null
-}
-
-export interface ImageResult {
-  rank: number
-  title: string
-  /** The page the image appears on, not the image file. */
-  url: string
-  source: string
-  thumbnail_url: string
-  image_url: string
-}
-
-export interface GuardAlert {
-  source: string
-  severity: 'low' | 'medium' | 'high'
-  rules: string[]
-  evidence: string
-}
-
-export interface ToolActivity {
-  tool: string
-  status: 'running' | 'done' | 'failed'
-  label: string
-  detail: string
-}
-
-export interface Totals {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-  cost: string | number
-  currency: string
-  /** True when any message was priced from an estimate. */
-  estimated: boolean
-}
-
-interface FeedbackRecord {
-  message_id: string
-  rating: Rating
-  reason: string | null
-}
-
-export interface ConversationDetail {
-  id: string
-  title: string
-  created_at: string
-  updated_at: string
-  messages: ChatMessage[]
-  feedback: Record<string, FeedbackRecord>
-  language: string | null
-  totals: Totals
-}
-
-interface StartPayload {
-  conversation_id: string
-  user_message_id: string
-  assistant_message_id: string
-  title: string
-  language: string | null
-}
-
-interface UsagePayload {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
-  cost: number
-  currency: string
-  source: string
-}
-
-interface StreamBody {
-  conversation_id?: string | null
-  content?: string
-  regenerate_of?: string
-  search_mode?: SearchMode
-}
+// Re-exported so components keep importing conversation types from one place.
+export type {
+  ChatMessage,
+  ConversationDetail,
+  GuardAlert,
+  ImageResult,
+  Rating,
+  Role,
+  SearchMode,
+  Source,
+  ToolActivity,
+  Totals,
+} from '@/lib/chat-types'
 
 export interface UseChat {
   messages: ChatMessage[]
@@ -155,15 +70,22 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
-  // Tool events are emitted before the answer exists, so they queue here until
-  // there is a message to attach them to.
+  // Guards and tools report before the answer exists, so they queue until there
+  // is a message to attach them to.
   const pendingToolsRef = useRef<ToolActivity[]>([])
-  // Guards fire before the answer exists, so findings queue the same way.
   const pendingGuardsRef = useRef<GuardAlert[]>([])
 
-  const patchMessage = useCallback((id: string, patch: Partial<ChatMessage>) => {
-    setMessages((current) => current.map((m) => (m.id === id ? { ...m, ...patch } : m)))
+  const patch = useCallback((id: string, changes: Partial<ChatMessage>) => {
+    setMessages((current) => current.map((m) => (m.id === id ? { ...m, ...changes } : m)))
   }, [])
+
+  const patchActive = useCallback(
+    (changes: Partial<ChatMessage>) => {
+      const id = assistantIdRef.current
+      if (id) patch(id, changes)
+    },
+    [patch],
+  )
 
   const reset = useCallback(() => {
     abortRef.current?.abort()
@@ -186,19 +108,17 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     const detail = await apiFetch<ConversationDetail>(`/conversations/${id}`)
     setConversationId(detail.id)
     setTitle(detail.title)
-    // Images and citations are stored in one table but rendered as two very
-    // different things. Splitting them here is what makes a reloaded
-    // conversation look like the one that was streamed, rather than turning
-    // the picture grid into a list of links.
+    // Images and citations are stored in one table but render as very different
+    // things, so a reloaded conversation has to be split back apart.
     setMessages(detail.messages.map(splitStoredSources))
     setRatings(
       Object.fromEntries(
-        Object.entries(detail.feedback ?? {}).map(([id, f]) => [id, f.rating]),
+        Object.entries(detail.feedback ?? {}).map(([key, f]) => [key, f.rating]),
       ),
     )
     setLanguage(detail.language)
     setTotals(detail.totals)
-    // Chips are per-turn and not persisted; a reloaded conversation has none.
+    // Chips are per-turn and not persisted.
     setSuggestions([])
     setStreaming(false)
   }, [])
@@ -220,6 +140,23 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     }
     abortRef.current?.abort()
   }, [])
+
+  /** Attach whatever arrived before the answer row existed. */
+  const flushPending = useCallback(
+    (assistantMessageId: string) => {
+      const tools = pendingToolsRef.current
+      const guards = pendingGuardsRef.current
+      pendingToolsRef.current = []
+      pendingGuardsRef.current = []
+      if (tools.length > 0 || guards.length > 0) {
+        patch(assistantMessageId, {
+          ...(tools.length > 0 && { tools }),
+          ...(guards.length > 0 && { guards }),
+        })
+      }
+    },
+    [patch],
+  )
 
   /** The stream loop, shared by sending and regenerating. */
   const run = useCallback(
@@ -250,141 +187,82 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         }
 
         for await (const frame of readSse(response.body, controller.signal)) {
-          const payload = safeParse(frame.data)
-          if (!payload) continue
-
-          switch (frame.event) {
-            case 'start': {
-              const start = payload as unknown as StartPayload
+          dispatchFrame(frame, {
+            onStart: (start) => {
               assistantIdRef.current = start.assistant_message_id
               setConversationId(start.conversation_id)
               setTitle(start.title)
               setLanguage(start.language)
               onConversationStarted?.(start.conversation_id, start.title)
               onStart(start)
-              if (pendingToolsRef.current.length > 0 || pendingGuardsRef.current.length > 0) {
-                const tools = pendingToolsRef.current
-                const guards = pendingGuardsRef.current
-                pendingToolsRef.current = []
-                pendingGuardsRef.current = []
-                patchMessage(start.assistant_message_id, {
-                  ...(tools.length > 0 && { tools }),
-                  ...(guards.length > 0 && { guards }),
-                })
-              }
-              break
-            }
-            case 'guard': {
-              const alert = payload as unknown as GuardAlert
+              flushPending(start.assistant_message_id)
+            },
+            onGuard: (alert) => {
               const id = assistantIdRef.current
-              if (id) {
-                setMessages((current) =>
-                  current.map((m) =>
-                    m.id === id ? { ...m, guards: [...(m.guards ?? []), alert] } : m,
-                  ),
-                )
-              } else {
+              if (!id) {
                 pendingGuardsRef.current = [...pendingGuardsRef.current, alert]
+                return
               }
-              break
-            }
-            case 'tool': {
-              const activity = payload as unknown as ToolActivity
+              setMessages((current) =>
+                current.map((m) =>
+                  m.id === id ? { ...m, guards: [...(m.guards ?? []), alert] } : m,
+                ),
+              )
+            },
+            onTool: (activity) => {
               const id = assistantIdRef.current
-              if (id) {
-                setMessages((current) =>
-                  current.map((m) =>
-                    m.id === id ? { ...m, tools: mergeTool(m.tools, activity) } : m,
-                  ),
-                )
-              } else {
+              if (!id) {
                 pendingToolsRef.current = mergeTool(pendingToolsRef.current, activity)
+                return
               }
-              break
-            }
-            case 'images': {
+              setMessages((current) =>
+                current.map((m) =>
+                  m.id === id ? { ...m, tools: mergeTool(m.tools, activity) } : m,
+                ),
+              )
+            },
+            onImages: (images) => patchActive({ images }),
+            onSources: (sources) => patchActive({ sources }),
+            onToken: (text) => {
               const id = assistantIdRef.current
-              if (!id) break
-              patchMessage(id, { images: (payload.images ?? []) as ImageResult[] })
-              break
-            }
-            case 'sources': {
-              const id = assistantIdRef.current
-              if (!id) break
-              const list = (payload.sources ?? []) as Source[]
-              patchMessage(id, { sources: list })
-              break
-            }
-            case 'token': {
-              const id = assistantIdRef.current
-              if (!id) break
-              const text = String(payload.text ?? '')
+              if (!id) return
               setMessages((current) =>
                 current.map((m) => (m.id === id ? { ...m, content: m.content + text } : m)),
               )
-              break
-            }
-            case 'suggestions': {
-              setSuggestions((payload.items as string[]) ?? [])
-              break
-            }
-            case 'usage': {
-              const u = payload as unknown as UsagePayload
-              const id = assistantIdRef.current
-              if (id) {
-                patchMessage(id, {
-                  prompt_tokens: u.prompt_tokens,
-                  completion_tokens: u.completion_tokens,
-                  cost: u.cost,
-                  usage_source: u.source,
-                })
-              }
-              // Roll into the running total rather than refetching: the server
-              // already told us what this turn cost.
-              setTotals((current) => ({
-                prompt_tokens: (current?.prompt_tokens ?? 0) + u.prompt_tokens,
-                completion_tokens: (current?.completion_tokens ?? 0) + u.completion_tokens,
-                total_tokens: (current?.total_tokens ?? 0) + u.total_tokens,
-                cost: Number(current?.cost ?? 0) + u.cost,
-                currency: u.currency,
-                estimated: (current?.estimated ?? false) || u.source === 'estimated',
-              }))
-              break
-            }
-            case 'error': {
-              const message = String(payload.message ?? 'Something went wrong.')
+            },
+            onUsage: (usage) => {
+              patchActive({
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+                cost: usage.cost,
+                usage_source: usage.source,
+              })
+              // Rolled in rather than refetched: the server already said what
+              // this turn cost.
+              setTotals((current) => addUsage(current, usage))
+            },
+            onSuggestions: setSuggestions,
+            onError: (message) => {
               setError(message)
-              if (assistantIdRef.current) {
-                patchMessage(assistantIdRef.current, { error: message })
-              }
-              break
-            }
-            case 'done': {
-              if (assistantIdRef.current) {
-                patchMessage(assistantIdRef.current, {
-                  streaming: false,
-                  finish_reason: String(payload.finish_reason ?? 'stop'),
-                })
-              }
-              break
-            }
-          }
+              patchActive({ error: message })
+            },
+            onDone: (finishReason) =>
+              patchActive({ streaming: false, finish_reason: finishReason }),
+          })
         }
       } catch (err) {
         // An abort is the stop button working, not a failure.
         if (!(err instanceof DOMException && err.name === 'AbortError')) {
           setError(err instanceof Error ? err.message : 'Could not reach the server.')
         }
-        if (assistantIdRef.current) {
-          patchMessage(assistantIdRef.current, { streaming: false })
-        }
+        patchActive({ streaming: false })
       } finally {
         setStreaming(false)
         abortRef.current = null
         assistantIdRef.current = null
       }
     },
-    [onConversationStarted, patchMessage],
+    [onConversationStarted, patch, patchActive, flushPending],
   )
 
   const send = useCallback(
@@ -394,21 +272,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
 
       // Optimistic user message, given the server's id on `start`.
       const provisionalId = `pending-${Date.now()}`
-      setMessages((current) => [
-        ...current,
-        {
-          id: provisionalId,
-          role: 'user',
-          content: trimmed,
-          finish_reason: null,
-          model: null,
-          created_at: new Date().toISOString(),
-          prompt_tokens: 0,
-          completion_tokens: 0,
-          cost: 0,
-          usage_source: null,
-        },
-      ])
+      setMessages((current) => [...current, newMessage(provisionalId, 'user', trimmed)])
 
       await run(
         {
@@ -417,11 +281,13 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
           search_mode: options?.searchMode ?? 'auto',
         },
         (start) => {
+          // The optimistic message takes the server's real id, so anything that
+          // later addresses it — a rating, an export, a reload — matches.
           setMessages((current) => [
             ...current.map((m) =>
               m.id === provisionalId ? { ...m, id: start.user_message_id } : m,
             ),
-            blankAssistant(start.assistant_message_id),
+            { ...newMessage(start.assistant_message_id, 'assistant', ''), streaming: true },
           ])
         },
       )
@@ -432,22 +298,23 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   const regenerate = useCallback(
     async (assistantMessageId: string) => {
       if (streaming) return
-      // The server reuses the same row, so the id is stable. Clearing it here
+      // The server reuses the same row, so the id is stable. Clearing in place
       // rather than removing and re-adding keeps scroll position steady.
       setRatings((current) => {
         const { [assistantMessageId]: _removed, ...rest } = current
         return rest
       })
-      setMessages((current) =>
-        current.map((m) =>
-          m.id === assistantMessageId
-            ? { ...m, content: '', finish_reason: null, error: null, streaming: true }
-            : m,
-        ),
-      )
+      patch(assistantMessageId, {
+        content: '',
+        finish_reason: null,
+        error: null,
+        streaming: true,
+        sources: undefined,
+        images: undefined,
+      })
       await run({ regenerate_of: assistantMessageId }, () => {})
     },
-    [streaming, run],
+    [streaming, run, patch],
   )
 
   const rate = useCallback((messageId: string, rating: Rating | null, reason?: string) => {
@@ -492,11 +359,11 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   }
 }
 
-function blankAssistant(id: string): ChatMessage {
+function newMessage(id: string, role: 'user' | 'assistant', content: string): ChatMessage {
   return {
     id,
-    role: 'assistant',
-    content: '',
+    role,
+    content,
     finish_reason: null,
     model: null,
     created_at: new Date().toISOString(),
@@ -504,22 +371,5 @@ function blankAssistant(id: string): ChatMessage {
     completion_tokens: 0,
     cost: 0,
     usage_source: null,
-    streaming: true,
-  }
-}
-
-/** Replace an activity for the same tool, so running becomes done in place. */
-function mergeTool(existing: ToolActivity[] | undefined, next: ToolActivity): ToolActivity[] {
-  const list = existing ?? []
-  const index = list.findIndex((t) => t.tool === next.tool)
-  if (index === -1) return [...list, next]
-  return list.map((t, i) => (i === index ? next : t))
-}
-
-function safeParse(data: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(data) as Record<string, unknown>
-  } catch {
-    return null
   }
 }
