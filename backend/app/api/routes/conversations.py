@@ -5,17 +5,21 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
+from fastapi.responses import PlainTextResponse
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, SettingsDep
 from app.api.schemas.chat import (
     ConversationDetail,
     ConversationList,
     ConversationSummary,
+    FeedbackResponse,
     RenameConversationRequest,
 )
 from app.core.errors import NotFoundError
 from app.db.repositories.conversations import SqlConversationRepository
 from app.services.chat_service import list_conversations
+from app.services.export_service import filename_for, to_markdown
+from app.services.feedback_service import FeedbackService
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -43,7 +47,38 @@ async def show(conversation_id: UUID, session: SessionDep, user: CurrentUser) ->
         # Someone else's conversation and a missing one give the same answer, so
         # the endpoint cannot be used to discover which ids exist.
         raise NotFoundError("No such conversation.")
-    return ConversationDetail.model_validate(conversation)
+
+    # Ratings come with the conversation rather than as a second request, so the
+    # thumbs render in their correct state on first paint instead of popping in.
+    ratings = await FeedbackService(session).for_conversation(
+        user_id=user.id, conversation_id=conversation_id
+    )
+    detail = ConversationDetail.model_validate(conversation)
+    detail.feedback = {
+        message_id: FeedbackResponse.model_validate(f) for message_id, f in ratings.items()
+    }
+    return detail
+
+
+@router.get("/{conversation_id}/export", response_class=PlainTextResponse)
+async def export(
+    conversation_id: UUID,
+    session: SessionDep,
+    user: CurrentUser,
+    settings: SettingsDep,
+) -> PlainTextResponse:
+    """Download the conversation as Markdown."""
+    conversation = await SqlConversationRepository(session).get(conversation_id, user.id)
+    if conversation is None:
+        raise NotFoundError("No such conversation.")
+
+    return PlainTextResponse(
+        content=to_markdown(conversation, app_name=settings.app_name),
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename_for(conversation)}"'
+        },
+    )
 
 
 @router.patch("/{conversation_id}", response_model=ConversationSummary)

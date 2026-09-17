@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Alert } from '@/components/ui'
+import { Download } from 'lucide-react'
+import { Alert, Button } from '@/components/ui'
+import { Logo } from '@/components/Logo'
 import { Composer } from '@/components/chat/Composer'
 import { MessageList } from '@/components/chat/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
-import { Logo } from '@/components/Logo'
 
 export default function Chat() {
   const { conversationId: routeId } = useParams<{ conversationId: string }>()
@@ -41,31 +42,58 @@ export default function Chat() {
     navigate('/')
   }
 
-  function open(id: string) {
-    navigate(`/c/${id}`)
-  }
-
   async function remove(id: string) {
     await list.remove(id)
     if (id === chat.conversationId || id === routeId) startNew()
   }
 
+  const activeId = chat.conversationId ?? routeId ?? null
   const empty = chat.messages.length === 0
 
   return (
     <div className="flex h-dvh overflow-hidden">
       <Sidebar
         conversations={list.conversations}
-        activeId={chat.conversationId ?? routeId ?? null}
+        activeId={activeId}
         loading={list.loading}
-        onSelect={open}
+        onSelect={(id) => navigate(`/c/${id}`)}
         onNew={startNew}
         onRename={list.rename}
         onDelete={remove}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        {empty ? <EmptyState /> : <MessageList messages={chat.messages} />}
+        {!empty && (
+          <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
+            <h1 className="truncate text-sm font-medium">{chat.title}</h1>
+            {activeId && (
+              // A plain link, not fetch-and-blob: the browser already knows how
+              // to save a file the server marked as an attachment.
+              <a
+                href={`/api/conversations/${activeId}/export`}
+                download
+                className="shrink-0"
+                title="Export as Markdown"
+              >
+                <Button variant="ghost" size="sm">
+                  <Download className="size-4" aria-hidden />
+                  Export
+                </Button>
+              </a>
+            )}
+          </header>
+        )}
+
+        {empty ? (
+          <EmptyState />
+        ) : (
+          <MessageList
+            messages={chat.messages}
+            ratings={chat.ratings}
+            onRate={chat.rate}
+            onRegenerate={chat.regenerate}
+          />
+        )}
 
         {(loadError || chat.error) && (
           <div className="mx-auto w-full max-w-[var(--message-column)] px-4">
@@ -73,12 +101,7 @@ export default function Chat() {
           </div>
         )}
 
-        <Composer
-          onSend={chat.send}
-          onStop={chat.stop}
-          streaming={chat.streaming}
-          autoFocus
-        />
+        <Composer onSend={chat.send} onStop={chat.stop} streaming={chat.streaming} autoFocus />
       </main>
     </div>
   )

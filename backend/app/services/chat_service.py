@@ -114,17 +114,21 @@ class ChatService:
         *,
         user_id: UUID,
         conversation_id: UUID | None,
-        content: str,
+        content: str = "",
+        regenerate_of: UUID | None = None,
     ) -> AsyncIterator[ChatEvent]:
-        content = content.strip()
-        if not content:
-            raise ValidationError("Message cannot be empty.")
-        if len(content) > MAX_MESSAGE_LENGTH:
-            raise ValidationError(
-                f"Message is too long ({len(content)} characters, limit {MAX_MESSAGE_LENGTH})."
-            )
-
-        start, history = await self._begin_turn(user_id, conversation_id, content)
+        if regenerate_of is None:
+            content = content.strip()
+            if not content:
+                raise ValidationError("Message cannot be empty.")
+            if len(content) > MAX_MESSAGE_LENGTH:
+                raise ValidationError(
+                    f"Message is too long ({len(content)} characters, "
+                    f"limit {MAX_MESSAGE_LENGTH})."
+                )
+            start, history = await self._begin_turn(user_id, conversation_id, content)
+        else:
+            start, history, content = await self._begin_regeneration(user_id, regenerate_of)
         yield start
 
         assistant_id = start.assistant_message_id
@@ -243,6 +247,51 @@ class ChatService:
             )
 
         return start, stored
+
+    async def _begin_regeneration(
+        self, user_id: UUID, assistant_message_id: UUID
+    ) -> tuple[StartEvent, tuple[StoredMessage, ...], str]:
+        """Clear an assistant message and re-answer the question above it.
+
+        Only the most recent assistant message can be regenerated. Regenerating
+        an earlier one would orphan every exchange after it, and silently
+        deleting a conversation's tail is not something a button should do.
+        """
+        async with self._session_maker() as session:
+            repo = SqlConversationRepository(session)
+            target = await repo.get_message(assistant_message_id)
+            if target is None or target.role != Role.ASSISTANT:
+                raise NotFoundError("No such message.")
+
+            conversation = await repo.get(target.conversation_id, user_id)
+            if conversation is None:
+                raise NotFoundError("No such message.")
+
+            ordered = conversation.messages
+            if not ordered or ordered[-1].id != target.id:
+                raise ValidationError("Only the latest response can be regenerated.")
+            if len(ordered) < 2 or ordered[-2].role != Role.USER:
+                raise ValidationError("There is no question to answer again.")
+
+            question = ordered[-2].content
+            history = tuple(
+                StoredMessage(role=Role(m.role), content=m.content) for m in ordered[:-2]
+            )
+
+            # Reuse the row so its id stays stable for anything referencing it.
+            target.content = ""
+            target.finish_reason = None
+            target.model = self._provider.info.model
+            await repo.touch(conversation)
+
+            start = StartEvent(
+                conversation_id=conversation.id,
+                user_message_id=ordered[-2].id,
+                assistant_message_id=target.id,
+                title=conversation.title,
+            )
+
+        return start, history, question
 
     async def _finish_turn(
         self, assistant_id: UUID, content: str, finish: FinishReason

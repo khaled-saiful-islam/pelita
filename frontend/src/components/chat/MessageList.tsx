@@ -2,10 +2,21 @@ import { useEffect, useRef } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { Markdown } from './Markdown'
+import { MessageActions } from './MessageActions'
 import { cn } from '@/lib/utils'
-import type { ChatMessage } from '@/hooks/useChat'
+import type { ChatMessage, Rating } from '@/hooks/useChat'
 
-export function MessageList({ messages }: { messages: ChatMessage[] }) {
+export function MessageList({
+  messages,
+  ratings,
+  onRate,
+  onRegenerate,
+}: {
+  messages: ChatMessage[]
+  ratings: Record<string, Rating>
+  onRate: (messageId: string, rating: Rating | null, reason?: string) => void
+  onRegenerate: (messageId: string) => void
+}) {
   const bottom = useRef<HTMLDivElement>(null)
   const container = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
@@ -32,8 +43,17 @@ export function MessageList({ messages }: { messages: ChatMessage[] }) {
     <div ref={container} className="flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[var(--message-column)] px-4 py-8">
         <div className="space-y-7">
-          {messages.map((message) => (
-            <MessageRow key={message.id} message={message} />
+          {messages.map((message, index) => (
+            <MessageRow
+              key={message.id}
+              message={message}
+              rating={ratings[message.id] ?? null}
+              // Only the latest answer can be regenerated: redoing an earlier
+              // one would orphan every exchange after it.
+              canRegenerate={index === messages.length - 1 && message.role === 'assistant'}
+              onRate={onRate}
+              onRegenerate={onRegenerate}
+            />
           ))}
         </div>
         <div ref={bottom} className="h-px" />
@@ -42,7 +62,19 @@ export function MessageList({ messages }: { messages: ChatMessage[] }) {
   )
 }
 
-function MessageRow({ message }: { message: ChatMessage }) {
+function MessageRow({
+  message,
+  rating,
+  canRegenerate,
+  onRate,
+  onRegenerate,
+}: {
+  message: ChatMessage
+  rating: Rating | null
+  canRegenerate: boolean
+  onRate: (messageId: string, rating: Rating | null, reason?: string) => void
+  onRegenerate: (messageId: string) => void
+}) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
@@ -74,6 +106,16 @@ function MessageRow({ message }: { message: ChatMessage }) {
           <AlertCircle className="size-3.5" aria-hidden />
           {message.error}
         </p>
+      )}
+
+      {!message.streaming && message.content.length > 0 && (
+        <MessageActions
+          content={message.content}
+          rating={rating}
+          canRegenerate={canRegenerate}
+          onRate={(next, reason) => onRate(message.id, next, reason)}
+          onRegenerate={() => onRegenerate(message.id)}
+        />
       )}
     </div>
   )

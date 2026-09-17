@@ -16,10 +16,11 @@ from uuid import UUID
 from fastapi import APIRouter, Request, status
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.deps import ChatServiceDep, CurrentUser
-from app.api.schemas.chat import SendMessageRequest
+from app.api.deps import ChatServiceDep, CurrentUser, SessionDep
+from app.api.schemas.chat import FeedbackRequest, FeedbackResponse, SendMessageRequest
 from app.core.errors import PelitaError
 from app.services.chat_service import DeltaEvent, DoneEvent, ErrorEvent, StartEvent
+from app.services.feedback_service import FeedbackService
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ async def stream(
                 user_id=user.id,
                 conversation_id=payload.conversation_id,
                 content=payload.content,
+                regenerate_of=payload.regenerate_of,
             ):
                 # A browser that navigated away should not keep the model running.
                 if await request.is_disconnected():
@@ -93,3 +95,24 @@ async def stop(message_id: UUID, chat: ChatServiceDep, user: CurrentUser) -> Non
     user needs to see.
     """
     await chat.stop(user_id=user.id, message_id=message_id)
+
+
+@router.put("/messages/{message_id}/feedback", response_model=FeedbackResponse)
+async def rate(
+    message_id: UUID,
+    payload: FeedbackRequest,
+    session: SessionDep,
+    user: CurrentUser,
+) -> FeedbackResponse:
+    feedback = await FeedbackService(session).rate(
+        user_id=user.id,
+        message_id=message_id,
+        rating=payload.rating,
+        reason=payload.reason,
+    )
+    return FeedbackResponse.model_validate(feedback)
+
+
+@router.delete("/messages/{message_id}/feedback", status_code=status.HTTP_204_NO_CONTENT)
+async def unrate(message_id: UUID, session: SessionDep, user: CurrentUser) -> None:
+    await FeedbackService(session).clear(user_id=user.id, message_id=message_id)

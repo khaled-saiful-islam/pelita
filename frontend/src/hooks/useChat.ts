@@ -1,9 +1,9 @@
 /**
  * Chat turn state.
  *
- * Holds the message list, drives the stream, and owns stopping. The transport
- * detail — that events arrive as SSE frames — stops here; components see
- * messages and a boolean.
+ * Holds the message list, drives the stream, and owns stopping, regenerating
+ * and rating. The transport detail — that events arrive as SSE frames — stops
+ * here; components see messages and a boolean.
  */
 
 import { useCallback, useRef, useState } from 'react'
@@ -11,6 +11,7 @@ import { apiFetch } from '@/lib/api'
 import { readSse } from '@/lib/sse'
 
 export type Role = 'user' | 'assistant'
+export type Rating = 'up' | 'down'
 
 export interface ChatMessage {
   id: string
@@ -24,12 +25,19 @@ export interface ChatMessage {
   error?: string | null
 }
 
+interface FeedbackRecord {
+  message_id: string
+  rating: Rating
+  reason: string | null
+}
+
 export interface ConversationDetail {
   id: string
   title: string
   created_at: string
   updated_at: string
   messages: ChatMessage[]
+  feedback: Record<string, FeedbackRecord>
 }
 
 interface StartPayload {
@@ -39,13 +47,22 @@ interface StartPayload {
   title: string
 }
 
+interface StreamBody {
+  conversation_id?: string | null
+  content?: string
+  regenerate_of?: string
+}
+
 export interface UseChat {
   messages: ChatMessage[]
   conversationId: string | null
   title: string | null
   streaming: boolean
   error: string | null
+  ratings: Record<string, Rating>
   send: (content: string) => Promise<void>
+  regenerate: (assistantMessageId: string) => Promise<void>
+  rate: (messageId: string, rating: Rating | null, reason?: string) => void
   stop: () => void
   load: (conversationId: string) => Promise<void>
   reset: () => void
@@ -57,6 +74,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   const [title, setTitle] = useState<string | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [ratings, setRatings] = useState<Record<string, Rating>>({})
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
@@ -74,6 +92,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setTitle(null)
     setStreaming(false)
     setError(null)
+    setRatings({})
   }, [])
 
   const load = useCallback(async (id: string) => {
@@ -83,6 +102,11 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setConversationId(detail.id)
     setTitle(detail.title)
     setMessages(detail.messages)
+    setRatings(
+      Object.fromEntries(
+        Object.entries(detail.feedback ?? {}).map(([id, f]) => [id, f.rating]),
+      ),
+    )
     setStreaming(false)
   }, [])
 
@@ -104,27 +128,11 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     abortRef.current?.abort()
   }, [])
 
-  const send = useCallback(
-    async (content: string) => {
-      const trimmed = content.trim()
-      if (!trimmed || streaming) return
-
+  /** The stream loop, shared by sending and regenerating. */
+  const run = useCallback(
+    async (body: StreamBody, onStart: (start: StartPayload) => void) => {
       setError(null)
       setStreaming(true)
-
-      // Optimistic user message, replaced by the server's id on `start`.
-      const provisionalId = `pending-${Date.now()}`
-      setMessages((current) => [
-        ...current,
-        {
-          id: provisionalId,
-          role: 'user',
-          content: trimmed,
-          finish_reason: null,
-          model: null,
-          created_at: new Date().toISOString(),
-        },
-      ])
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -133,7 +141,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         const response = await fetch('/api/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversation_id: conversationId, content: trimmed }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         })
 
@@ -156,20 +164,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               setConversationId(start.conversation_id)
               setTitle(start.title)
               onConversationStarted?.(start.conversation_id, start.title)
-              setMessages((current) => [
-                ...current.map((m) =>
-                  m.id === provisionalId ? { ...m, id: start.user_message_id } : m,
-                ),
-                {
-                  id: start.assistant_message_id,
-                  role: 'assistant',
-                  content: '',
-                  finish_reason: null,
-                  model: null,
-                  created_at: new Date().toISOString(),
-                  streaming: true,
-                },
-              ])
+              onStart(start)
               break
             }
             case 'token': {
@@ -214,10 +209,107 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         assistantIdRef.current = null
       }
     },
-    [conversationId, streaming, onConversationStarted, patchMessage],
+    [onConversationStarted, patchMessage],
   )
 
-  return { messages, conversationId, title, streaming, error, send, stop, load, reset }
+  const send = useCallback(
+    async (content: string) => {
+      const trimmed = content.trim()
+      if (!trimmed || streaming) return
+
+      // Optimistic user message, given the server's id on `start`.
+      const provisionalId = `pending-${Date.now()}`
+      setMessages((current) => [
+        ...current,
+        {
+          id: provisionalId,
+          role: 'user',
+          content: trimmed,
+          finish_reason: null,
+          model: null,
+          created_at: new Date().toISOString(),
+        },
+      ])
+
+      await run({ conversation_id: conversationId, content: trimmed }, (start) => {
+        setMessages((current) => [
+          ...current.map((m) => (m.id === provisionalId ? { ...m, id: start.user_message_id } : m)),
+          blankAssistant(start.assistant_message_id),
+        ])
+      })
+    },
+    [conversationId, streaming, run],
+  )
+
+  const regenerate = useCallback(
+    async (assistantMessageId: string) => {
+      if (streaming) return
+      // The server reuses the same row, so the id is stable. Clearing it here
+      // rather than removing and re-adding keeps scroll position steady.
+      setRatings((current) => {
+        const { [assistantMessageId]: _removed, ...rest } = current
+        return rest
+      })
+      setMessages((current) =>
+        current.map((m) =>
+          m.id === assistantMessageId
+            ? { ...m, content: '', finish_reason: null, error: null, streaming: true }
+            : m,
+        ),
+      )
+      await run({ regenerate_of: assistantMessageId }, () => {})
+    },
+    [streaming, run],
+  )
+
+  const rate = useCallback((messageId: string, rating: Rating | null, reason?: string) => {
+    setRatings((current) => {
+      if (rating === null) {
+        const { [messageId]: _removed, ...rest } = current
+        return rest
+      }
+      return { ...current, [messageId]: rating }
+    })
+
+    const request =
+      rating === null
+        ? apiFetch<void>(`/chat/messages/${messageId}/feedback`, { method: 'DELETE' })
+        : apiFetch<FeedbackRecord>(`/chat/messages/${messageId}/feedback`, {
+            method: 'PUT',
+            body: JSON.stringify({ rating, reason: reason ?? null }),
+          })
+
+    request.catch(() => {
+      // A rating that fails to save is not worth interrupting anyone over.
+    })
+  }, [])
+
+  return {
+    messages,
+    conversationId,
+    title,
+    streaming,
+    error,
+    ratings,
+    send,
+    regenerate,
+    rate,
+    stop,
+    load,
+    reset,
+  }
+}
+
+function blankAssistant(id: string): ChatMessage {
+  return {
+    id,
+    role: 'assistant',
+    content: '',
+    finish_reason: null,
+    model: null,
+    created_at: new Date().toISOString(),
+    streaming: true,
+  }
 }
 
 function safeParse(data: string): Record<string, unknown> | null {
