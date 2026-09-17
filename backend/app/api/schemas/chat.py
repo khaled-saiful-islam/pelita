@@ -47,6 +47,10 @@ class SourceResponse(BaseModel):
     title: str
     url: str
     snippet: str
+    # Present only for image-search results. Without these the grid cannot be
+    # rebuilt on reload, and the pictures come back as a list of links.
+    thumbnail_url: str | None = None
+    image_url: str | None = None
 
 
 class MessageResponse(BaseModel):

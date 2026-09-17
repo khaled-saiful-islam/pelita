@@ -113,6 +113,9 @@ count alone does not answer it.
   are titled, not what is in them — there is no vision call.
 - **Thumbnails are hotlinked.** They can rot, and some hosts block hotlinking;
   the tile disappears when that happens.
+- **A grid of entirely dead thumbnails renders as nothing**, while the answer
+  still refers to images. Each tile removes itself on error, and none of them
+  knows the others also failed.
 - **Citation rewriting is textual.** A `[1]` inside an HTML block in markdown is
   not protected the way fenced code is.
 - **The hover card has no collision detection.** Near the top of the column it
@@ -120,7 +123,11 @@ count alone does not answer it.
 
 ## Tests
 
-`frontend/src/lib/citations.test.ts` — 14 tests: single and multiple markers,
+`frontend/src/lib/citations.test.ts` — image results moved out of sources on
+reload, ordinary citations left alone, mixed sets separated, a result with only
+a full image treated as an image, and untouched messages returned by identity.
+
+ — 14 tests: single and multiple markers,
 grouped markers splitting, unknown ranks left as text, groups with a missing
 member, fenced and inline code untouched, existing links and images not
 re-wrapped, quote escaping in titles, no sources, and empty input.
@@ -130,6 +137,18 @@ data-URI thumbnails never used as links, six stock hosts skipped, a library
 named only in the source field skipped, tiny images skipped, unreported sizes
 kept, contiguous ranks after filtering, and HTML entities decoded in both search
 and news parsing.
+
+### Images survive a reload
+
+Image results and citations live in the same table, because an image result *is*
+a source. They render as very different things, so the frontend splits them
+apart when a conversation is loaded.
+
+Getting this wrong is invisible while streaming and obvious afterwards: the grid
+appeared during the answer and came back as a list of links on refresh, because
+the stored rows arrived in  and nothing moved them into . The
+API response also has to carry  and , or there is
+nothing to split on.
 
 ## Verified
 

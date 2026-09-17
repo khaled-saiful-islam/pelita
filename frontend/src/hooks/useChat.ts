@@ -9,6 +9,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 import { readSse } from '@/lib/sse'
+import { splitStoredSources } from '@/lib/messages'
 
 export type Role = 'user' | 'assistant'
 export type Rating = 'up' | 'down'
@@ -42,6 +43,9 @@ export interface Source {
   title: string
   url: string
   snippet: string
+  /** Set only on image-search results. */
+  thumbnail_url?: string | null
+  image_url?: string | null
 }
 
 export interface ImageResult {
@@ -182,7 +186,11 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     const detail = await apiFetch<ConversationDetail>(`/conversations/${id}`)
     setConversationId(detail.id)
     setTitle(detail.title)
-    setMessages(detail.messages)
+    // Images and citations are stored in one table but rendered as two very
+    // different things. Splitting them here is what makes a reloaded
+    // conversation look like the one that was streamed, rather than turning
+    // the picture grid into a list of links.
+    setMessages(detail.messages.map(splitStoredSources))
     setRatings(
       Object.fromEntries(
         Object.entries(detail.feedback ?? {}).map(([id, f]) => [id, f.rating]),
