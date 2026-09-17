@@ -26,6 +26,7 @@ from app.core.tokens import count_message_tokens, count_tokens
 from app.db.models.conversation import Conversation, Message
 from app.db.models.source import MessageSource
 from app.db.repositories.conversations import SqlConversationRepository
+from app.guards.base import ContentSource, Guard, GuardVerdict
 from app.providers.base import (
     ChatRequest,
     FinishReason,
@@ -87,6 +88,17 @@ class ToolEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class GuardEventPayload:
+    """A guard fired. Surfaced so the banner can explain itself rather than
+    silently altering what the model sees."""
+
+    source: str
+    severity: str
+    rules: tuple[str, ...]
+    evidence: str
+
+
+@dataclass(frozen=True, slots=True)
 class SourcesEvent:
     sources: tuple[ToolResult, ...]
 
@@ -114,6 +126,7 @@ class ErrorEvent:
 ChatEvent = (
     StartEvent
     | ToolEvent
+    | GuardEventPayload
     | SourcesEvent
     | DeltaEvent
     | AccountingEvent
@@ -121,6 +134,15 @@ ChatEvent = (
     | DoneEvent
     | ErrorEvent
 )
+
+
+def _guard_payload(verdict: GuardVerdict) -> GuardEventPayload:
+    return GuardEventPayload(
+        source=str(verdict.source),
+        severity=verdict.severity.label,
+        rules=verdict.rules,
+        evidence=verdict.findings[0].evidence if verdict.findings else "",
+    )
 
 
 def derive_title(text: str) -> str:
@@ -153,6 +175,7 @@ class ChatService:
         default_language: str,
         search: SearchProvider | None = None,
         search_limit: int = 5,
+        guards: tuple[Guard, ...] = (),
         suggestions_enabled: bool = True,
         suggestions_count: int = 3,
         memory_auto_extract: bool = True,
@@ -170,6 +193,7 @@ class ChatService:
         self._default_language = default_language
         self._search = search
         self._search_limit = search_limit
+        self._guards = guards
         self._suggestions_enabled = suggestions_enabled
         self._suggestions_count = suggestions_count
         self._memory_auto_extract = memory_auto_extract
@@ -210,6 +234,9 @@ class ChatService:
         tool_results: tuple[ToolResult, ...] = ()
 
         try:
+            for verdict in self._scan(content, ContentSource.USER_INPUT):
+                yield _guard_payload(verdict)
+
             tool_results: tuple[ToolResult, ...] = ()
             if use_search and self._search is not None:
                 yield ToolEvent(
@@ -220,7 +247,12 @@ class ChatService:
                 )
                 try:
                     found = await self._search.search(content, limit=self._search_limit)
-                    tool_results = tuple(found)
+                    # Scanned before the contributor sees them. Retrieved pages
+                    # are the realistic injection vector: nobody asked that page
+                    # for instructions.
+                    tool_results, verdicts = self._scan_results(found)
+                    for verdict in verdicts:
+                        yield _guard_payload(verdict)
                     yield ToolEvent(
                         tool=self._search.name,
                         status="done",
@@ -330,6 +362,50 @@ class ChatService:
         return self._cancellation.cancel(message_id)
 
     # -- internals -------------------------------------------------------
+
+    def _scan(self, text: str, source: ContentSource) -> list[GuardVerdict]:
+        """Run every guard over one piece of text, returning only what fired."""
+        flagged: list[GuardVerdict] = []
+        for guard in self._guards:
+            try:
+                verdict = guard.inspect(text, source)
+            except Exception:  # noqa: BLE001 - a broken guard must not end a turn
+                logger.exception("guard %r failed on %s", getattr(guard, "name", guard), source)
+                continue
+            if verdict.flagged:
+                logger.info(
+                    "guard %s fired on %s: %s", guard.name, source.value, verdict.rules
+                )
+                flagged.append(verdict)
+        return flagged
+
+    def _scan_results(
+        self, results: list[ToolResult]
+    ) -> tuple[tuple[ToolResult, ...], list[GuardVerdict]]:
+        """Sanitise tool output, keeping the cleaned text for the prompt.
+
+        The original title and url are preserved for the source list — a
+        citation should still be clickable even when its page misbehaved.
+        """
+        cleaned: list[ToolResult] = []
+        verdicts: list[GuardVerdict] = []
+
+        for result in results:
+            found = self._scan(result.snippet, ContentSource.WEB_SEARCH)
+            snippet = result.snippet
+            for verdict in found:
+                snippet = verdict.sanitized
+            verdicts.extend(found)
+            cleaned.append(
+                ToolResult(
+                    tool=result.tool,
+                    title=result.title,
+                    url=result.url,
+                    snippet=snippet,
+                    rank=result.rank,
+                )
+            )
+        return tuple(cleaned), verdicts
 
     async def _memories_for(self, user_id: UUID) -> tuple[str, ...]:
         """Enabled facts, newest first. Never raises."""

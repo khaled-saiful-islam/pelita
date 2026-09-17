@@ -19,6 +19,7 @@ from app.core.security import decode_access_token
 from app.db.models.user import User
 from app.db.repositories.users import SqlUserRepository
 from app.db.session import SessionFactory, session_scope
+from app.guards.registry import build_guards
 from app.providers.base import TokenBudget
 from app.providers.registry import build_provider
 from app.services.accounting_service import Pricing
@@ -105,6 +106,7 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
             if settings.search_enabled
             else None
         ),
+        guards=build_guards(settings),
         search_limit=settings.search_max_results,
         suggestions_enabled=settings.suggestions_enabled,
         suggestions_count=settings.suggestions_count,

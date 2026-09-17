@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Spinner } from '@/components/ui'
 import { AuthProvider, useAuth } from '@/lib/auth'
+import { ThemeProvider } from '@/lib/theme'
 import Chat from '@/pages/Chat'
 import Profile from '@/pages/Profile'
 import Settings from '@/pages/Settings'
@@ -9,6 +10,7 @@ import SignIn from '@/pages/SignIn'
 export default function App() {
   return (
     <BrowserRouter>
+      <ThemeProvider>
       <AuthProvider>
         <Routes>
           <Route path="/signin" element={<PublicOnly><SignIn /></PublicOnly>} />
@@ -19,6 +21,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   )
 }

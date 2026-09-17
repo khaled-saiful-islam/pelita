@@ -6,6 +6,7 @@ import { MessageActions } from './MessageActions'
 import { MessageUsage } from './Usage'
 import { Sources } from './Sources'
 import { ToolActivityList } from './ToolActivity'
+import { GuardBanner } from './GuardBanner'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, Rating } from '@/hooks/useChat'
 
@@ -101,6 +102,10 @@ function MessageRow({
 
   return (
     <div className="group/message">
+      {message.guards && message.guards.length > 0 && (
+        <GuardBanner alerts={message.guards} />
+      )}
+
       {message.tools && message.tools.length > 0 && (
         <ToolActivityList activities={message.tools} />
       )}

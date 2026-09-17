@@ -24,6 +24,7 @@ from app.services.chat_service import (
     DeltaEvent,
     DoneEvent,
     ErrorEvent,
+    GuardEventPayload,
     SourcesEvent,
     StartEvent,
     SuggestionsEvent,
@@ -54,6 +55,18 @@ def _to_sse(event: object) -> dict[str, str] | None:
             }
         case DeltaEvent():
             return {"event": "token", "data": json.dumps({"text": event.text})}
+        case GuardEventPayload():
+            return {
+                "event": "guard",
+                "data": json.dumps(
+                    {
+                        "source": event.source,
+                        "severity": event.severity,
+                        "rules": list(event.rules),
+                        "evidence": event.evidence,
+                    }
+                ),
+            }
         case ToolEvent():
             return {
                 "event": "tool",

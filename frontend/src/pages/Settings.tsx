@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Brain, Check, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { ArrowLeft, Brain, Check, Monitor, Moon, Pencil, Plus, Sun, Trash2, X } from 'lucide-react'
 import { Alert, Button, Card, Input, Spinner } from '@/components/ui'
 import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useTheme, type ThemeChoice } from '@/lib/theme'
 
 interface Memory {
   id: string
@@ -100,7 +101,9 @@ export default function Settings() {
 
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
 
-      <Card className="mt-8 p-6">
+      <ThemeCard />
+
+      <Card className="mt-6 p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="inline-flex items-center gap-2 font-medium">
@@ -255,5 +258,51 @@ function MemoryRow({
         </div>
       )}
     </li>
+  )
+}
+
+
+const THEMES: { value: ThemeChoice; label: string; Icon: typeof Sun }[] = [
+  { value: 'light', label: 'Light', Icon: Sun },
+  { value: 'dark', label: 'Dark', Icon: Moon },
+  { value: 'system', label: 'System', Icon: Monitor },
+]
+
+function ThemeCard() {
+  const { choice, setChoice } = useTheme()
+
+  return (
+    <Card className="mt-8 p-6">
+      <h2 className="font-medium">Appearance</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Every colour comes from one file, so a fork can restyle the whole app by editing
+        <code className="mx-1 rounded bg-muted px-1 py-0.5 text-xs">theme.css</code>.
+      </p>
+
+      <div
+        role="radiogroup"
+        aria-label="Theme"
+        className="mt-4 inline-flex rounded-lg border border-border p-1"
+      >
+        {THEMES.map(({ value, label, Icon }) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={choice === value}
+            onClick={() => setChoice(value)}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors',
+              choice === value
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted',
+            )}
+          >
+            <Icon className="size-3.5" aria-hidden />
+            {label}
+          </button>
+        ))}
+      </div>
+    </Card>
   )
 }

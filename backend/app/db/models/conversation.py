@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, created_at, updated_at, uuid_pk
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.db.models.source import MessageSource
 
 
 class Conversation(Base):
@@ -70,7 +74,11 @@ class Message(Base):
     created_at: Mapped[datetime] = created_at()
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
-    sources: Mapped[list] = relationship(
+    # The element type is required. A bare `Mapped[list]` makes SQLAlchemy
+    # treat this as a scalar, and assigning a list then fails with
+    # "'list' object has no attribute '_sa_instance_state'" — after the answer
+    # has already streamed, which kills the response mid-chunk.
+    sources: Mapped[list[MessageSource]] = relationship(
         "MessageSource",
         cascade="all, delete-orphan",
         order_by="MessageSource.rank",

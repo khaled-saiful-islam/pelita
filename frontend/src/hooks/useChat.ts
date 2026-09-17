@@ -28,6 +28,8 @@ export interface ChatMessage {
   sources?: Source[]
   /** What tools ran for this answer, in order. */
   tools?: ToolActivity[]
+  /** Guard findings for this turn. */
+  guards?: GuardAlert[]
   /** True only for the message currently being written. */
   streaming?: boolean
   error?: string | null
@@ -38,6 +40,13 @@ export interface Source {
   title: string
   url: string
   snippet: string
+}
+
+export interface GuardAlert {
+  source: string
+  severity: 'low' | 'medium' | 'high'
+  rules: string[]
+  evidence: string
 }
 
 export interface ToolActivity {
@@ -133,6 +142,8 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   // Tool events are emitted before the answer exists, so they queue here until
   // there is a message to attach them to.
   const pendingToolsRef = useRef<ToolActivity[]>([])
+  // Guards fire before the answer exists, so findings queue the same way.
+  const pendingGuardsRef = useRef<GuardAlert[]>([])
 
   const patchMessage = useCallback((id: string, patch: Partial<ChatMessage>) => {
     setMessages((current) => current.map((m) => (m.id === id ? { ...m, ...patch } : m)))
@@ -197,6 +208,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
       setStreaming(true)
       setSuggestions([])
       pendingToolsRef.current = []
+      pendingGuardsRef.current = []
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -230,10 +242,29 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               setLanguage(start.language)
               onConversationStarted?.(start.conversation_id, start.title)
               onStart(start)
-              if (pendingToolsRef.current.length > 0) {
-                const queued = pendingToolsRef.current
+              if (pendingToolsRef.current.length > 0 || pendingGuardsRef.current.length > 0) {
+                const tools = pendingToolsRef.current
+                const guards = pendingGuardsRef.current
                 pendingToolsRef.current = []
-                patchMessage(start.assistant_message_id, { tools: queued })
+                pendingGuardsRef.current = []
+                patchMessage(start.assistant_message_id, {
+                  ...(tools.length > 0 && { tools }),
+                  ...(guards.length > 0 && { guards }),
+                })
+              }
+              break
+            }
+            case 'guard': {
+              const alert = payload as unknown as GuardAlert
+              const id = assistantIdRef.current
+              if (id) {
+                setMessages((current) =>
+                  current.map((m) =>
+                    m.id === id ? { ...m, guards: [...(m.guards ?? []), alert] } : m,
+                  ),
+                )
+              } else {
+                pendingGuardsRef.current = [...pendingGuardsRef.current, alert]
               }
               break
             }
