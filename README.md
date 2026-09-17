@@ -7,7 +7,7 @@ Switching from OpenAI to Groq, Ollama, OpenRouter or vLLM means editing three
 lines of `.env`. No code change, no vendor SDK — nothing in this repository
 imports `openai`, `anthropic` or anything like them.
 
-![Pelita — a chat about an attached brief, in dark theme](docs/images/screenshot.png)
+![Pelita — a chat about an attached brief, in dark theme](docs/images/screenshot-dark.png)
 
 ## Quick start
 
