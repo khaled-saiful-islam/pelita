@@ -7,8 +7,8 @@ no existing contributor changes, because none of them knows the others exist.
 Reserved order values:
 
     100  system prompt
-    200  memory                  (feature 017)
-    300  tool results            (features 015, 016)
+    200  memory                  (feature 013)
+    300  tool results            (feature 011)
     350  free — retrieval / RAG
     400  history
     500  user message
@@ -20,6 +20,7 @@ from app.context.base import ContextContributor
 from app.context.contributors import (
     HistoryContributor,
     SystemPromptContributor,
+    ToolResultsContributor,
     UserMessageContributor,
 )
 from app.core.config import Settings, get_settings
@@ -29,6 +30,7 @@ def build_contributors(settings: Settings | None = None) -> tuple[ContextContrib
     settings = settings or get_settings()
     return (
         SystemPromptContributor(settings.system_prompt),
+        ToolResultsContributor(),
         HistoryContributor(),
         UserMessageContributor(),
     )

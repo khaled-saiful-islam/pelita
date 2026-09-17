@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from app.providers.base import ChatMessage, Role, TokenBudget
+from app.providers.base import ChatMessage, Role, TokenBudget, ToolResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +39,8 @@ class TurnContext:
     budget: TokenBudget = TokenBudget(memory=512, tools=2048, history=4096)
     # ISO 639-1 of the conversation, or None before detection has run.
     language: str | None = None
+    # Output of any tools that ran for this turn (search, news, later RAG).
+    tool_results: tuple[ToolResult, ...] = ()
 
 
 @runtime_checkable

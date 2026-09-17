@@ -24,6 +24,7 @@ from app.context.pipeline import build_messages
 from app.core.errors import NotFoundError, ValidationError
 from app.core.tokens import count_message_tokens, count_tokens
 from app.db.models.conversation import Conversation, Message
+from app.db.models.source import MessageSource
 from app.db.repositories.conversations import SqlConversationRepository
 from app.providers.base import (
     ChatRequest,
@@ -33,6 +34,7 @@ from app.providers.base import (
     Role,
     TokenBudget,
     TokenEvent,
+    ToolResult,
     Usage,
     UsageSource,
 )
@@ -40,6 +42,7 @@ from app.providers.base import UsageEvent as ProviderUsageEvent
 from app.services.accounting_service import Accounting, Pricing, price
 from app.services.cancellation import CancellationRegistry
 from app.services.language_service import detect_language
+from app.tools.serpapi import SearchProvider, SearchUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,22 @@ class DeltaEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolEvent:
+    """Progress of a tool, so the UI can say what is happening and why the
+    first token is taking a moment."""
+
+    tool: str
+    status: str  # running | done | failed
+    label: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SourcesEvent:
+    sources: tuple[ToolResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AccountingEvent:
     accounting: Accounting
 
@@ -82,7 +101,9 @@ class ErrorEvent:
     message: str
 
 
-ChatEvent = StartEvent | DeltaEvent | AccountingEvent | DoneEvent | ErrorEvent
+ChatEvent = (
+    StartEvent | ToolEvent | SourcesEvent | DeltaEvent | AccountingEvent | DoneEvent | ErrorEvent
+)
 
 
 def derive_title(text: str) -> str:
@@ -113,6 +134,8 @@ class ChatService:
         pricing: Pricing,
         supported_languages: list[str],
         default_language: str,
+        search: SearchProvider | None = None,
+        search_limit: int = 5,
     ) -> None:
         self._session_maker = session_maker
         self._provider = provider
@@ -124,6 +147,8 @@ class ChatService:
         self._pricing = pricing
         self._supported_languages = supported_languages
         self._default_language = default_language
+        self._search = search
+        self._search_limit = search_limit
 
     # -- public ----------------------------------------------------------
 
@@ -134,6 +159,7 @@ class ChatService:
         conversation_id: UUID | None,
         content: str = "",
         regenerate_of: UUID | None = None,
+        use_search: bool = False,
     ) -> AsyncIterator[ChatEvent]:
         if regenerate_of is None:
             content = content.strip()
@@ -156,8 +182,40 @@ class ChatService:
         error: str | None = None
         usage: Usage | None = None
         request_messages: tuple = ()
+        tool_results: tuple[ToolResult, ...] = ()
 
         try:
+            tool_results: tuple[ToolResult, ...] = ()
+            if use_search and self._search is not None:
+                yield ToolEvent(
+                    tool=self._search.name,
+                    status="running",
+                    label="Searching the web",
+                    detail=content[:80],
+                )
+                try:
+                    found = await self._search.search(content, limit=self._search_limit)
+                    tool_results = tuple(found)
+                    yield ToolEvent(
+                        tool=self._search.name,
+                        status="done",
+                        label="Searched the web",
+                        detail=f"{len(found)} result{'' if len(found) == 1 else 's'}",
+                    )
+                    if tool_results:
+                        yield SourcesEvent(sources=tool_results)
+                except SearchUnavailable as exc:
+                    # A failed search degrades the answer; it does not end the
+                    # turn. The model answers from what it knows and the UI says
+                    # search did not run.
+                    logger.info("search unavailable: %s", exc)
+                    yield ToolEvent(
+                        tool=self._search.name,
+                        status="failed",
+                        label="Search unavailable",
+                        detail=str(exc),
+                    )
+
             turn = TurnContext(
                 conversation_id=start.conversation_id,
                 user_id=user_id,
@@ -166,6 +224,7 @@ class ChatService:
                 history=history,
                 budget=self._budget,
                 language=start.language,
+                tool_results=tool_results,
             )
             messages, trace = await build_messages(turn, self._contributors)
             request_messages = messages
@@ -206,7 +265,9 @@ class ChatService:
             )
             # Persist whatever arrived, even on error or cancellation. A partial
             # answer the user watched appear should still be there on reload.
-            await self._finish_turn(assistant_id, "".join(collected), finish, accounting)
+            await self._finish_turn(
+                assistant_id, "".join(collected), finish, accounting, tool_results
+            )
 
         yield AccountingEvent(accounting=accounting)
         if error is not None:
@@ -351,6 +412,7 @@ class ChatService:
         content: str,
         finish: FinishReason,
         accounting: Accounting,
+        sources: tuple[ToolResult, ...] = (),
     ) -> None:
         async with self._session_maker() as session:
             repo = SqlConversationRepository(session)
@@ -364,6 +426,21 @@ class ChatService:
             message.completion_tokens = accounting.completion_tokens
             message.cost = accounting.cost
             message.usage_source = str(accounting.source)
+
+            if sources:
+                # Replaced wholesale, so regenerating with search on does not
+                # accumulate citations from the previous attempt.
+                message.sources = [
+                    MessageSource(
+                        message_id=message.id,
+                        tool=source.tool,
+                        title=source.title[:500],
+                        url=source.url,
+                        snippet=source.snippet,
+                        rank=source.rank,
+                    )
+                    for source in sources
+                ]
 
 
 async def list_conversations(

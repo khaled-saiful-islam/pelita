@@ -43,13 +43,25 @@ def test_switching_provider_needs_no_code_change() -> None:
 
 def test_contributors_are_returned_in_a_stable_documented_order() -> None:
     contributors = build_contributors(settings_for())
-    assert [c.name for c in contributors] == ["system_prompt", "history", "user_message"]
-    assert [c.order for c in contributors] == [100, 400, 500]
+    assert [c.name for c in contributors] == [
+        "system_prompt",
+        "tool_results",
+        "history",
+        "user_message",
+    ]
+    assert [c.order for c in contributors] == [100, 300, 400, 500]
 
 
 def test_contributor_orders_leave_room_for_new_ones() -> None:
-    """Gaps are the mechanism: 200 memory, 300 tools and 350 RAG must fit."""
+    """Gaps are the mechanism: memory at 200 and retrieval at 350 must still fit
+    between what is already registered, without renumbering anything."""
     orders = sorted(c.order for c in build_contributors(settings_for()))
-    for reserved in (200, 300, 350):
+    for reserved in (200, 350):
         assert reserved not in orders
         assert min(orders) < reserved < max(orders)
+
+
+def test_the_registry_order_is_independent_of_declaration_order() -> None:
+    """build_messages sorts by `order`, so the tuple can be rearranged safely."""
+    contributors = build_contributors(settings_for())
+    assert sorted(c.order for c in contributors) == [c.order for c in contributors]

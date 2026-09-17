@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, Square } from 'lucide-react'
+import { ArrowUp, Globe, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const MAX_HEIGHT_PX = 224 // matches --composer-max-height in theme.css
@@ -9,17 +9,21 @@ export function Composer({
   onStop,
   streaming,
   disabled,
+  searchEnabled,
   placeholder = 'Message Pelita…',
   autoFocus,
 }: {
-  onSend: (text: string) => void
+  onSend: (text: string, options: { useSearch: boolean }) => void
   onStop: () => void
   streaming: boolean
   disabled?: boolean
+  /** False when SERPAPI_KEY is unset; the toggle is shown but not usable. */
+  searchEnabled: boolean
   placeholder?: string
   autoFocus?: boolean
 }) {
   const [value, setValue] = useState('')
+  const [useSearch, setUseSearch] = useState(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
 
   // Grow with the content up to a ceiling, then scroll inside.
@@ -33,7 +37,7 @@ export function Composer({
   function submit() {
     const text = value.trim()
     if (!text || streaming) return
-    onSend(text)
+    onSend(text, { useSearch: useSearch && searchEnabled })
     setValue('')
   }
 
@@ -53,10 +57,11 @@ export function Composer({
       <div className="mx-auto w-full max-w-[var(--message-column)] px-4 pb-4">
         <div
           className={cn(
-            'flex items-end gap-2 rounded-2xl border border-input bg-surface p-2 shadow',
+            'rounded-2xl border border-input bg-surface p-2 shadow',
             'transition-shadow focus-within:ring-2 focus-within:ring-ring',
           )}
         >
+        <div className="flex items-end gap-2">
           <textarea
             ref={textarea}
             rows={1}
@@ -102,6 +107,30 @@ export function Composer({
               <ArrowUp className="size-4" aria-hidden />
             </button>
           )}
+        </div>
+
+        <div className="flex items-center gap-1 px-1 pt-1.5">
+          <button
+            type="button"
+            onClick={() => setUseSearch((on) => !on)}
+            disabled={!searchEnabled}
+            aria-pressed={useSearch && searchEnabled}
+            title={
+              searchEnabled
+                ? 'Search the web before answering'
+                : 'Set SERPAPI_KEY in .env to enable web search'
+            }
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors',
+              !searchEnabled && 'cursor-not-allowed text-muted-foreground/50',
+              searchEnabled && useSearch && 'bg-accent-100 text-accent-800',
+              searchEnabled && !useSearch && 'text-muted-foreground hover:bg-muted',
+            )}
+          >
+            <Globe className="size-3.5" aria-hidden />
+            Search
+          </button>
+        </div>
         </div>
 
         <p className="mt-2 text-center text-xs text-muted-foreground">

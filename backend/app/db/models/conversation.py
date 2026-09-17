@@ -70,5 +70,11 @@ class Message(Base):
     created_at: Mapped[datetime] = created_at()
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+    sources: Mapped[list] = relationship(
+        "MessageSource",
+        cascade="all, delete-orphan",
+        order_by="MessageSource.rank",
+        lazy="selectin",
+    )
 
     __table_args__ = (Index("ix_messages_conversation_created", "conversation_id", "created_at"),)

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.context.base import ContextContributor, TurnContext, assistant, system, user
 from app.context.pipeline import trim_to_budget
+from app.core.tokens import count_tokens
 from app.providers.base import ChatMessage, Role
 from app.services.language_service import reply_instruction
 
@@ -26,6 +27,43 @@ class SystemPromptContributor(ContextContributor):
         if ctx.language:
             parts.append(reply_instruction(ctx.language))
         return [system("\n\n".join(parts))] if parts else []
+
+
+class ToolResultsContributor(ContextContributor):
+    """Search results and anything else a tool produced.
+
+    Order 300: after standing context, before history, so the model reads the
+    fresh material as the most recently established facts rather than as part of
+    an old exchange.
+
+    Results are numbered and the model is told to cite them, which is what makes
+    the source list under an answer correspond to the text above it.
+    """
+
+    name = "tool_results"
+    order = 300
+
+    async def contribute(self, ctx: TurnContext) -> list[ChatMessage]:
+        if not ctx.tool_results:
+            return []
+
+        lines: list[str] = [
+            "Search results are given below. Use them to answer, and cite the "
+            "ones you rely on inline as [1], [2] and so on. If they do not "
+            "answer the question, say so rather than inventing a source.",
+            "",
+        ]
+        used = count_tokens("\n".join(lines), ctx.model)
+
+        for result in ctx.tool_results:
+            block = f"[{result.rank}] {result.title}\n{result.url}\n{result.snippet}".strip()
+            cost = count_tokens(block, ctx.model)
+            if used + cost > ctx.budget.tools:
+                break
+            lines.extend([block, ""])
+            used += cost
+
+        return [system("\n".join(lines).strip())]
 
 
 class HistoryContributor(ContextContributor):

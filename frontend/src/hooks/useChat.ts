@@ -25,9 +25,26 @@ export interface ChatMessage {
   cost: string | number
   /** 'provider' when the model reported the counts, 'estimated' when we did. */
   usage_source: string | null
+  sources?: Source[]
+  /** What tools ran for this answer, in order. */
+  tools?: ToolActivity[]
   /** True only for the message currently being written. */
   streaming?: boolean
   error?: string | null
+}
+
+export interface Source {
+  rank: number
+  title: string
+  url: string
+  snippet: string
+}
+
+export interface ToolActivity {
+  tool: string
+  status: 'running' | 'done' | 'failed'
+  label: string
+  detail: string
 }
 
 export interface Totals {
@@ -78,6 +95,7 @@ interface StreamBody {
   conversation_id?: string | null
   content?: string
   regenerate_of?: string
+  use_search?: boolean
 }
 
 export interface UseChat {
@@ -90,7 +108,7 @@ export interface UseChat {
   language: string | null
   totals: Totals | null
   currency: string
-  send: (content: string) => Promise<void>
+  send: (content: string, options?: { useSearch?: boolean }) => Promise<void>
   regenerate: (assistantMessageId: string) => Promise<void>
   rate: (messageId: string, rating: Rating | null, reason?: string) => void
   stop: () => void
@@ -110,6 +128,9 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
+  // Tool events are emitted before the answer exists, so they queue here until
+  // there is a message to attach them to.
+  const pendingToolsRef = useRef<ToolActivity[]>([])
 
   const patchMessage = useCallback((id: string, patch: Partial<ChatMessage>) => {
     setMessages((current) => current.map((m) => (m.id === id ? { ...m, ...patch } : m)))
@@ -169,6 +190,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     async (body: StreamBody, onStart: (start: StartPayload) => void) => {
       setError(null)
       setStreaming(true)
+      pendingToolsRef.current = []
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -202,6 +224,32 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               setLanguage(start.language)
               onConversationStarted?.(start.conversation_id, start.title)
               onStart(start)
+              if (pendingToolsRef.current.length > 0) {
+                const queued = pendingToolsRef.current
+                pendingToolsRef.current = []
+                patchMessage(start.assistant_message_id, { tools: queued })
+              }
+              break
+            }
+            case 'tool': {
+              const activity = payload as unknown as ToolActivity
+              const id = assistantIdRef.current
+              if (id) {
+                setMessages((current) =>
+                  current.map((m) =>
+                    m.id === id ? { ...m, tools: mergeTool(m.tools, activity) } : m,
+                  ),
+                )
+              } else {
+                pendingToolsRef.current = mergeTool(pendingToolsRef.current, activity)
+              }
+              break
+            }
+            case 'sources': {
+              const id = assistantIdRef.current
+              if (!id) break
+              const list = (payload.sources ?? []) as Source[]
+              patchMessage(id, { sources: list })
               break
             }
             case 'token': {
@@ -273,7 +321,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   )
 
   const send = useCallback(
-    async (content: string) => {
+    async (content: string, options?: { useSearch?: boolean }) => {
       const trimmed = content.trim()
       if (!trimmed || streaming) return
 
@@ -295,12 +343,21 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         },
       ])
 
-      await run({ conversation_id: conversationId, content: trimmed }, (start) => {
-        setMessages((current) => [
-          ...current.map((m) => (m.id === provisionalId ? { ...m, id: start.user_message_id } : m)),
-          blankAssistant(start.assistant_message_id),
-        ])
-      })
+      await run(
+        {
+          conversation_id: conversationId,
+          content: trimmed,
+          use_search: options?.useSearch ?? false,
+        },
+        (start) => {
+          setMessages((current) => [
+            ...current.map((m) =>
+              m.id === provisionalId ? { ...m, id: start.user_message_id } : m,
+            ),
+            blankAssistant(start.assistant_message_id),
+          ])
+        },
+      )
     },
     [conversationId, streaming, run],
   )
@@ -381,6 +438,14 @@ function blankAssistant(id: string): ChatMessage {
     usage_source: null,
     streaming: true,
   }
+}
+
+/** Replace an activity for the same tool, so running becomes done in place. */
+function mergeTool(existing: ToolActivity[] | undefined, next: ToolActivity): ToolActivity[] {
+  const list = existing ?? []
+  const index = list.findIndex((t) => t.tool === next.tool)
+  if (index === -1) return [...list, next]
+  return list.map((t, i) => (i === index ? next : t))
 }
 
 function safeParse(data: string): Record<string, unknown> | null {

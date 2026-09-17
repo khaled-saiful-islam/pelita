@@ -13,7 +13,7 @@ import logging
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, status
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import ChatServiceDep, CurrentUser, SessionDep
@@ -24,7 +24,9 @@ from app.services.chat_service import (
     DeltaEvent,
     DoneEvent,
     ErrorEvent,
+    SourcesEvent,
     StartEvent,
+    ToolEvent,
 )
 from app.services.feedback_service import FeedbackService
 
@@ -51,6 +53,35 @@ def _to_sse(event: object) -> dict[str, str] | None:
             }
         case DeltaEvent():
             return {"event": "token", "data": json.dumps({"text": event.text})}
+        case ToolEvent():
+            return {
+                "event": "tool",
+                "data": json.dumps(
+                    {
+                        "tool": event.tool,
+                        "status": event.status,
+                        "label": event.label,
+                        "detail": event.detail,
+                    }
+                ),
+            }
+        case SourcesEvent():
+            return {
+                "event": "sources",
+                "data": json.dumps(
+                    {
+                        "sources": [
+                            {
+                                "rank": s.rank,
+                                "title": s.title,
+                                "url": s.url,
+                                "snippet": s.snippet,
+                            }
+                            for s in event.sources
+                        ]
+                    }
+                ),
+            }
         case AccountingEvent():
             return {"event": "usage", "data": json.dumps(event.accounting.as_event())}
         case ErrorEvent():
@@ -69,8 +100,18 @@ async def stream(
     payload: SendMessageRequest,
     chat: ChatServiceDep,
     user: CurrentUser,
-    request: Request,
 ) -> EventSourceResponse:
+    """Stream a turn.
+
+    Disconnect handling is left entirely to `EventSourceResponse`, which listens
+    on the ASGI receive channel and cancels this generator when the client goes
+    away. Calling `request.is_disconnected()` in here as well puts two readers on
+    the same channel: whichever consumes `http.disconnect` first wins, the
+    response never finishes its chunked encoding, and the browser reports
+    ERR_INCOMPLETE_CHUNKED_ENCODING after rendering a complete answer. curl does
+    not mind, which is what makes it easy to ship.
+    """
+
     async def publish() -> AsyncIterator[dict[str, str]]:
         try:
             async for event in chat.stream_turn(
@@ -78,11 +119,8 @@ async def stream(
                 conversation_id=payload.conversation_id,
                 content=payload.content,
                 regenerate_of=payload.regenerate_of,
+                use_search=payload.use_search,
             ):
-                # A browser that navigated away should not keep the model running.
-                if await request.is_disconnected():
-                    logger.info("client disconnected; ending stream")
-                    break
                 frame = _to_sse(event)
                 if frame is not None:
                     yield frame

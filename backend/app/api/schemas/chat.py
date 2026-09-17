@@ -16,6 +16,8 @@ class SendMessageRequest(BaseModel):
     # When set, re-answers the question above this assistant message instead of
     # adding a new turn. `content` is ignored.
     regenerate_of: UUID | None = None
+    # Run a web search before answering. Ignored when SERPAPI_KEY is unset.
+    use_search: bool = False
 
 
 class FeedbackRequest(BaseModel):
@@ -35,6 +37,15 @@ class RenameConversationRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+class SourceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    rank: int
+    title: str
+    url: str
+    snippet: str
+
+
 class MessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -48,6 +59,7 @@ class MessageResponse(BaseModel):
     completion_tokens: int
     cost: Decimal
     usage_source: str | None
+    sources: list[SourceResponse] = []
 
 
 class ConversationSummary(BaseModel):

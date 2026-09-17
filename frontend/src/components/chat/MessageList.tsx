@@ -4,6 +4,8 @@ import { Logo } from '@/components/Logo'
 import { Markdown } from './Markdown'
 import { MessageActions } from './MessageActions'
 import { MessageUsage } from './Usage'
+import { Sources } from './Sources'
+import { ToolActivityList } from './ToolActivity'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, Rating } from '@/hooks/useChat'
 
@@ -95,12 +97,20 @@ function MessageRow({
 
   return (
     <div className="group/message">
+      {message.tools && message.tools.length > 0 && (
+        <ToolActivityList activities={message.tools} />
+      )}
+
       {waiting ? (
         <Working />
       ) : (
         <div className={cn('min-w-0', message.streaming && 'streaming-caret')}>
           <Markdown content={message.content} />
         </div>
+      )}
+
+      {message.sources && message.sources.length > 0 && (
+        <Sources sources={message.sources} />
       )}
 
       {message.finish_reason === 'stopped' && (

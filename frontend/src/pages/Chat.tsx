@@ -7,13 +7,16 @@ import { Composer } from '@/components/chat/Composer'
 import { MessageList } from '@/components/chat/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { ConversationUsage } from '@/components/chat/Usage'
+import { NewsStrip } from '@/components/news/NewsStrip'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
+import { useConfig } from '@/hooks/useConfig'
 
 export default function Chat() {
   const { conversationId: routeId } = useParams<{ conversationId: string }>()
   const navigate = useNavigate()
   const list = useConversations()
+  const config = useConfig()
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const onConversationStarted = useCallback(
@@ -106,7 +109,15 @@ export default function Chat() {
           </div>
         )}
 
-        <Composer onSend={chat.send} onStop={chat.stop} streaming={chat.streaming} autoFocus />
+        {empty && <NewsStrip />}
+
+        <Composer
+          onSend={(text, options) => chat.send(text, { useSearch: options.useSearch })}
+          onStop={chat.stop}
+          streaming={chat.streaming}
+          searchEnabled={config?.search_enabled ?? false}
+          autoFocus
+        />
       </main>
     </div>
   )

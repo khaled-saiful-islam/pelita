@@ -25,6 +25,7 @@ from app.services.accounting_service import Pricing
 from app.services.auth_service import AuthService
 from app.services.cancellation import registry as cancellation_registry
 from app.services.chat_service import ChatService
+from app.tools.serpapi import SerpApiSearch
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -95,6 +96,16 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
         pricing=Pricing.from_settings(settings),
         supported_languages=settings.supported_language_list,
         default_language=settings.default_language,
+        # None when no key is configured, so the toggle simply does nothing
+        # rather than failing every search.
+        search=(
+            SerpApiSearch(
+                api_key=settings.serpapi_key, base_url=settings.serpapi_base_url
+            )
+            if settings.search_enabled
+            else None
+        ),
+        search_limit=settings.search_max_results,
     )
 
 
