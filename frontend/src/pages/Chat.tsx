@@ -172,11 +172,19 @@ export default function Chat() {
         )}
 
         <Composer
-          onSend={(text, options) => chat.send(text, { searchMode: options.searchMode })}
+          onSend={(text, options) =>
+            chat.send(text, {
+              searchMode: options.searchMode,
+              // The pending files become cards on this message, and leave the
+              // composer — the server binds them to the same id.
+              documents: documents.pending,
+              onSent: documents.markSent,
+            })
+          }
           onStop={chat.stop}
           streaming={chat.streaming}
           searchEnabled={config?.search_enabled ?? false}
-          files={documents.files}
+          files={documents.pending}
           uploadingFile={documents.uploading}
           atFileLimit={documents.files.length >= documents.maxFiles}
           onAttach={attach}

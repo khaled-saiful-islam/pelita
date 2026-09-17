@@ -54,6 +54,21 @@ export interface Totals {
   estimated: boolean
 }
 
+/** A file attached to a conversation. Mirrors DocumentResponse. */
+export interface AttachedFile {
+  id: string
+  /** Null while the file is still in the composer. */
+  message_id: string | null
+  filename: string
+  media_type: string
+  size_bytes: number
+  /** "page" for a PDF, "paragraph" for a docx, "line" for text. */
+  unit: string
+  unit_count: number
+  token_count: number
+  created_at: string
+}
+
 export interface ChatMessage {
   id: string
   role: Role
@@ -72,6 +87,8 @@ export interface ChatMessage {
   tools?: ToolActivity[]
   /** Guard findings for this turn. */
   guards?: GuardAlert[]
+  /** Files sent with this message, shown as cards above it. */
+  documents?: AttachedFile[]
   /** True only for the message currently being written. */
   streaming?: boolean
   error?: string | null

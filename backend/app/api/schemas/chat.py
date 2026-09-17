@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.schemas.document import DocumentResponse
 from app.services.chat_service import MAX_MESSAGE_LENGTH
 
 
@@ -67,6 +68,7 @@ class MessageResponse(BaseModel):
     cost: Decimal
     usage_source: str | None
     sources: list[SourceResponse] = []
+    documents: list[DocumentResponse] = []
 
 
 class ConversationSummary(BaseModel):

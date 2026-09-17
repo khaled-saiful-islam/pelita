@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
@@ -67,6 +67,23 @@ class DocumentService:
             .order_by(Document.created_at)
         )
         return list(result.scalars().all())
+
+    async def attach_to_message(self, conversation_id: UUID, message_id: UUID) -> int:
+        """Bind files uploaded since the last message to the one being sent.
+
+        A file is uploaded before there is a message to hang it on, so it sits
+        unbound until the user actually sends something. That gap is the whole
+        state model: unbound means "still in the composer", bound means "shown
+        in the transcript at the point it was added".
+
+        Returns how many were bound, so a caller can log it.
+        """
+        result = await self._session.execute(
+            update(Document)
+            .where(Document.conversation_id == conversation_id, Document.message_id.is_(None))
+            .values(message_id=message_id)
+        )
+        return int(result.rowcount or 0)
 
     async def add(
         self,

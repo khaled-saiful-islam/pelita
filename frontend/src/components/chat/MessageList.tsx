@@ -8,6 +8,7 @@ import { Sources } from './Sources'
 import { ToolActivityList } from './ToolActivity'
 import { GuardBanner } from './GuardBanner'
 import { ImageGrid } from './ImageGrid'
+import { MessageAttachments } from './Attachments'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, Rating } from '@/hooks/useChat'
 
@@ -91,9 +92,16 @@ function MessageRow({
 }) {
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-bubble-user px-4 py-2.5 text-bubble-user-foreground">
-          <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed">{message.content}</p>
+      <div>
+        {message.documents && message.documents.length > 0 && (
+          <MessageAttachments files={message.documents} />
+        )}
+        <div className="flex justify-end">
+          <div className="max-w-[85%] rounded-2xl rounded-br-md bg-bubble-user px-4 py-2.5 text-bubble-user-foreground">
+            <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed">
+              {message.content}
+            </p>
+          </div>
         </div>
       </div>
     )

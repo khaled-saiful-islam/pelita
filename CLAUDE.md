@@ -98,7 +98,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 86% backend, across 502 backend and 38 frontend tests.
+Target 80%. Currently 86% backend, across 508 backend and 38 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -229,6 +229,12 @@ Be honest about these rather than discovering them:
 - **Uploads are stored as extracted text, not as bytes.** No object storage to
   configure, and a bad PDF fails once at upload rather than inside a chat turn.
   The cost is that the original cannot be shown back or re-parsed later.
+- **`documents.message_id` is nullable, and that is the state model.** Null
+  means "still in the composer", set means "a card in the transcript". A file is
+  uploaded before there is a message to bind it to, so the gap is real rather
+  than an oversight. `_begin_turn` binds pending files in the same transaction
+  that saves the question, which is what stops the composer and the transcript
+  disagreeing after a reload. The limit counts every file, not the pending ones.
 - **The document budget is split evenly across files**, not first-come.
   Otherwise one long file consumes it and a question about the third is answered
   from nothing, with no way for the user to see why.

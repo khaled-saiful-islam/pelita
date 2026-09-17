@@ -12,6 +12,7 @@ import { readSse } from '@/lib/sse'
 import { addUsage, dispatchFrame, mergeTool } from '@/lib/chat-events'
 import { splitStoredSources } from '@/lib/messages'
 import type {
+  AttachedFile,
   ChatMessage,
   ConversationDetail,
   FeedbackRecord,
@@ -26,6 +27,7 @@ import type {
 
 // Re-exported so components keep importing conversation types from one place.
 export type {
+  AttachedFile,
   ChatMessage,
   ConversationDetail,
   GuardAlert,
@@ -38,6 +40,14 @@ export type {
   Totals,
 } from '@/lib/chat-types'
 
+export interface SendOptions {
+  searchMode?: SearchMode
+  /** Files attached but not yet sent; they become cards on this message. */
+  documents?: AttachedFile[]
+  /** Called with the server's id for the message, once it exists. */
+  onSent?: (userMessageId: string) => void
+}
+
 export interface UseChat {
   messages: ChatMessage[]
   conversationId: string | null
@@ -49,7 +59,7 @@ export interface UseChat {
   totals: Totals | null
   currency: string
   suggestions: string[]
-  send: (content: string, options?: { searchMode?: SearchMode }) => Promise<void>
+  send: (content: string, options?: SendOptions) => Promise<void>
   regenerate: (assistantMessageId: string) => Promise<void>
   rate: (messageId: string, rating: Rating | null, reason?: string) => void
   stop: () => void
@@ -266,13 +276,17 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   )
 
   const send = useCallback(
-    async (content: string, options?: { searchMode?: SearchMode }) => {
+    async (content: string, options?: SendOptions) => {
       const trimmed = content.trim()
       if (!trimmed || streaming) return
 
       // Optimistic user message, given the server's id on `start`.
       const provisionalId = `pending-${Date.now()}`
-      setMessages((current) => [...current, newMessage(provisionalId, 'user', trimmed)])
+      const documents = options?.documents ?? []
+      setMessages((current) => [
+        ...current,
+        { ...newMessage(provisionalId, 'user', trimmed), documents },
+      ])
 
       await run(
         {
@@ -282,13 +296,25 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         },
         (start) => {
           // The optimistic message takes the server's real id, so anything that
-          // later addresses it — a rating, an export, a reload — matches.
+          // later addresses it — a rating, an export, a reload — matches. The
+          // files move with it: the server bound them to this same id in the
+          // transaction that saved the question.
           setMessages((current) => [
             ...current.map((m) =>
-              m.id === provisionalId ? { ...m, id: start.user_message_id } : m,
+              m.id === provisionalId
+                ? {
+                    ...m,
+                    id: start.user_message_id,
+                    documents: documents.map((d) => ({
+                      ...d,
+                      message_id: start.user_message_id,
+                    })),
+                  }
+                : m,
             ),
             { ...newMessage(start.assistant_message_id, 'assistant', ''), streaming: true },
           ])
+          options?.onSent?.(start.user_message_id)
         },
       )
     },

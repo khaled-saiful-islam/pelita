@@ -510,6 +510,27 @@ class ChatService:
             logger.exception("could not load memories for %s", user_id)
             return ()
 
+    async def _attach_pending_documents(
+        self, session: AsyncSession, conversation_id: UUID, message_id: UUID
+    ) -> None:
+        """Bind unsent files to the message being sent. Never raises.
+
+        A file that fails to bind is still readable — the contributor loads by
+        conversation — so the only loss is the card in the transcript. Not worth
+        failing a turn over.
+        """
+        try:
+            bound = await DocumentService(
+                session,
+                max_bytes=self._settings.document_max_bytes,
+                max_per_conversation=self._settings.document_max_per_conversation,
+                model=self._provider.info.model,
+            ).attach_to_message(conversation_id, message_id)
+            if bound:
+                logger.info("attached %d file(s) to message %s", bound, message_id)
+        except Exception:  # noqa: BLE001 - a missing card is not a failed turn
+            logger.exception("could not attach documents to message %s", message_id)
+
     async def _documents_for(self, conversation_id: UUID) -> tuple[AttachedDocument, ...]:
         """Files attached to this conversation, oldest first. Never raises."""
         try:
@@ -576,6 +597,10 @@ class ChatService:
             user_message = await repo.add_message(
                 Message(conversation_id=conversation.id, role=Role.USER, content=content)
             )
+            # Files uploaded since the last message belong to this one. Doing it
+            # here, in the same transaction that persists the question, is what
+            # makes the composer and the transcript agree after a reload.
+            await self._attach_pending_documents(session, conversation.id, user_message.id)
             assistant_message = await repo.add_message(
                 Message(
                     conversation_id=conversation.id,

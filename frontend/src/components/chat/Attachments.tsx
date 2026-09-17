@@ -3,10 +3,17 @@ import { cn } from '@/lib/utils'
 import { formatBytes, type AttachedFile } from '@/hooks/useDocuments'
 
 /**
- * Attached files, shown inside the composer above the text area.
+ * Attached files, in the two places they appear.
  *
- * Inside rather than above it, because they are part of what you are about to
- * send — the same reason a mail client puts attachments in the compose window.
+ * `Attachments` is the composer: files you have picked but not yet sent, each
+ * removable. Inside the composer rather than above it, because they are part of
+ * what you are about to send — the same reason a mail client puts attachments
+ * in the compose window.
+ *
+ * `MessageAttachments` is the transcript: once sent, a file becomes a card
+ * above the message that sent it and stays there. That is where it belongs —
+ * the composer is for what happens next, and a file that never left it reads as
+ * one that never arrived.
  */
 export function Attachments({
   files,
@@ -64,5 +71,50 @@ function Pending({ name }: { name: string }) {
       <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
       <span className="truncate">Reading {name}…</span>
     </span>
+  )
+}
+
+
+/**
+ * Files sent with a message, shown as cards above it.
+ *
+ * Aligned with the user bubble rather than the column, so the card reads as
+ * part of that message. No remove button: the file is in the conversation's
+ * history now, and the model has already read it — taking the card away would
+ * not take that back.
+ */
+export function MessageAttachments({ files }: { files: AttachedFile[] }) {
+  if (files.length === 0) return null
+
+  return (
+    <div className="mb-1.5 flex flex-wrap justify-end gap-2">
+      {files.map((file) => (
+        <Card key={file.id} file={file} />
+      ))}
+    </div>
+  )
+}
+
+function Card({ file }: { file: AttachedFile }) {
+  return (
+    <div
+      className={cn(
+        'flex max-w-[15rem] items-center gap-2.5 rounded-xl border border-border',
+        'bg-surface-raised px-3 py-2 text-left',
+      )}
+    >
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10">
+        <FileText className="size-4 text-primary" aria-hidden />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-[0.8125rem] font-medium leading-tight">
+          {file.filename}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {file.unit_count} {file.unit}
+          {file.unit_count === 1 ? '' : 's'} · {formatBytes(file.size_bytes)}
+        </span>
+      </span>
+    </div>
   )
 }

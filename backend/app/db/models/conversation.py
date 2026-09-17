@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, created_at, updated_at, uuid_pk
 
 if TYPE_CHECKING:  # pragma: no cover
+    from app.db.models.document import Document
     from app.db.models.source import MessageSource
 
 
@@ -83,6 +84,15 @@ class Message(Base):
         cascade="all, delete-orphan",
         order_by="MessageSource.rank",
         lazy="selectin",
+    )
+    # Files sent with this message. Not cascaded: a file belongs to the
+    # conversation and stays readable for the rest of it, so deleting the
+    # message it arrived with must not take it away.
+    documents: Mapped[list[Document]] = relationship(
+        "Document",
+        order_by="Document.created_at",
+        lazy="selectin",
+        viewonly=True,
     )
 
     __table_args__ = (Index("ix_messages_conversation_created", "conversation_id", "created_at"),)

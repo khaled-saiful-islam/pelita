@@ -10,7 +10,7 @@ from app.context.base import AttachedDocument, TurnContext
 from app.context.documents import DocumentContributor
 from app.core.errors import NotFoundError, ValidationError
 from app.core.tokens import count_tokens
-from app.db.models.conversation import Conversation
+from app.db.models.conversation import Conversation, Message
 from app.providers.base import Role, TokenBudget
 from app.services.document_excerpts import chunk_document, keywords, select_excerpts
 from app.services.document_extract import (
@@ -416,6 +416,126 @@ async def test_deleting_someone_elses_file_is_not_found(service, db_user, conver
         await service.delete(
             user_id=uuid4(), conversation_id=conversation.id, document_id=document.id
         )
+
+
+# --- binding a file to the message that sent it -------------------------
+
+
+async def make_message(session, conversation: Conversation) -> Message:
+    message = Message(conversation_id=conversation.id, role="user", content="Ask")
+    session.add(message)
+    await session.flush()
+    return message
+
+
+async def test_a_new_file_belongs_to_no_message_yet(service, db_user, conversation):
+    """Between the upload and the next send it is still in the composer."""
+    document = await service.add(
+        user_id=db_user.id,
+        conversation_id=conversation.id,
+        filename="a.txt",
+        media_type="text/plain",
+        data=b"content",
+    )
+    assert document.message_id is None
+
+
+async def test_sending_binds_the_pending_files(session, service, db_user, conversation):
+    for name in ("a.txt", "b.txt"):
+        await service.add(
+            user_id=db_user.id,
+            conversation_id=conversation.id,
+            filename=name,
+            media_type="text/plain",
+            data=b"content",
+        )
+    message = await make_message(session, conversation)
+
+    bound = await service.attach_to_message(conversation.id, message.id)
+
+    assert bound == 2
+    assert all(d.message_id == message.id for d in await service.list_for(conversation.id))
+
+
+async def test_a_second_send_leaves_the_first_message_alone(
+    session, service, db_user, conversation
+):
+    """Otherwise every card jumps to the newest message as the chat goes on."""
+    first_file = await service.add(
+        user_id=db_user.id,
+        conversation_id=conversation.id,
+        filename="first.txt",
+        media_type="text/plain",
+        data=b"content",
+    )
+    first_message = await make_message(session, conversation)
+    await service.attach_to_message(conversation.id, first_message.id)
+
+    second_file = await service.add(
+        user_id=db_user.id,
+        conversation_id=conversation.id,
+        filename="second.txt",
+        media_type="text/plain",
+        data=b"content",
+    )
+    second_message = await make_message(session, conversation)
+    bound = await service.attach_to_message(conversation.id, second_message.id)
+
+    assert bound == 1
+    await session.refresh(first_file)
+    await session.refresh(second_file)
+    assert first_file.message_id == first_message.id
+    assert second_file.message_id == second_message.id
+
+
+async def test_sending_with_nothing_attached_binds_nothing(session, service, conversation):
+    message = await make_message(session, conversation)
+    assert await service.attach_to_message(conversation.id, message.id) == 0
+
+
+async def test_a_bound_file_still_counts_against_the_limit(
+    session, db_user, conversation
+):
+    """The limit is on the conversation, not on the composer — otherwise
+    sending resets it and a chat can hold any number of files."""
+    two = DocumentService(session, max_bytes=1024 * 1024, max_per_conversation=2)
+    for name in ("a.txt", "b.txt"):
+        await two.add(
+            user_id=db_user.id,
+            conversation_id=conversation.id,
+            filename=name,
+            media_type="text/plain",
+            data=b"content",
+        )
+    message = await make_message(session, conversation)
+    await two.attach_to_message(conversation.id, message.id)
+
+    with pytest.raises(ValidationError, match="which is the limit"):
+        await two.add(
+            user_id=db_user.id,
+            conversation_id=conversation.id,
+            filename="third.txt",
+            media_type="text/plain",
+            data=b"content",
+        )
+
+
+async def test_a_bound_file_is_still_read_by_the_contributor(
+    session, service, db_user, conversation
+):
+    """A file stays readable for the rest of the chat, not just its own turn."""
+    await service.add(
+        user_id=db_user.id,
+        conversation_id=conversation.id,
+        filename="brief.txt",
+        media_type="text/plain",
+        data=b"The budget is RM 250,000.",
+    )
+    message = await make_message(session, conversation)
+    await service.attach_to_message(conversation.id, message.id)
+
+    listed = await service.list_for(conversation.id)
+    assert [d.filename for d in listed] == ["brief.txt"]
 
 
 @pytest.mark.parametrize(

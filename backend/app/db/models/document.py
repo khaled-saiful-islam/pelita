@@ -26,6 +26,12 @@ class Document(Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
+    # The user message this file was sent with. Null between the upload and the
+    # next message — that gap is what the composer shows as a pending chip, and
+    # what the transcript has not yet got a card for.
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
 
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     media_type: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -40,4 +46,7 @@ class Document(Base):
 
     created_at: Mapped[datetime] = created_at()
 
-    __table_args__ = (Index("ix_documents_conversation", "conversation_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_documents_conversation", "conversation_id", "created_at"),
+        Index("ix_documents_message", "message_id"),
+    )

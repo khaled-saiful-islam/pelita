@@ -1,17 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiError, apiFetch } from '@/lib/api'
+import type { AttachedFile } from '@/lib/chat-types'
 
-export interface AttachedFile {
-  id: string
-  filename: string
-  media_type: string
-  size_bytes: number
-  /** "page" for a PDF, "paragraph" for a docx, "line" for text. */
-  unit: string
-  unit_count: number
-  token_count: number
-  created_at: string
-}
+export type { AttachedFile } from '@/lib/chat-types'
 
 interface DocumentList {
   items: AttachedFile[]
@@ -31,19 +22,29 @@ export function formatBytes(bytes: number): string {
 }
 
 export interface UseDocuments {
+  /** Every file in the conversation — what the limit counts. */
   files: AttachedFile[]
+  /** Those not yet sent with a message — what the composer shows. */
+  pending: AttachedFile[]
   maxFiles: number
   maxBytes: number
   uploading: string | null
   error: string | null
   attach: (file: File, conversationId: string) => Promise<void>
   remove: (id: string, conversationId: string) => Promise<void>
+  /** Move the pending files onto a message, matching what the server just did. */
+  markSent: (messageId: string) => void
   clearError: () => void
   reset: () => void
 }
 
 /**
  * Files attached to a conversation.
+ *
+ * A file is uploaded the moment it is picked, before there is a message to hang
+ * it on, so it stays *pending* until one is sent. Pending is what the composer
+ * shows; sent files have moved to a card in the transcript. The limit counts
+ * both, because it is a limit on the conversation, not on the composer.
  *
  * Checks the limits before uploading so a rejected file does not cost a long
  * upload first. The server checks them again — this is a courtesy, not a
@@ -109,6 +110,19 @@ export function useDocuments(conversationId: string | null): UseDocuments {
     [files, maxFiles, maxBytes],
   )
 
+  /**
+   * Mark the pending files as sent.
+   *
+   * The server binds them in the same transaction that saves the question; this
+   * is the client agreeing immediately, so the chips clear as the message is
+   * sent rather than a request later.
+   */
+  const markSent = useCallback((messageId: string) => {
+    setFiles((current) =>
+      current.map((f) => (f.message_id === null ? { ...f, message_id: messageId } : f)),
+    )
+  }, [])
+
   const remove = useCallback(async (id: string, targetConversationId: string) => {
     const previous = files
     setFiles((current) => current.filter((f) => f.id !== id))
@@ -121,14 +135,18 @@ export function useDocuments(conversationId: string | null): UseDocuments {
     }
   }, [files])
 
+  const pending = useMemo(() => files.filter((f) => f.message_id === null), [files])
+
   return {
     files,
+    pending,
     maxFiles,
     maxBytes,
     uploading,
     error,
     attach,
     remove,
+    markSent,
     clearError: () => setError(null),
     reset: () => {
       setFiles([])

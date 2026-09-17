@@ -7,7 +7,7 @@ Switching from OpenAI to Groq, Ollama, OpenRouter or vLLM means editing three
 lines of `.env`. No code change, no vendor SDK — nothing in this repository
 imports `openai`, `anthropic` or anything like them.
 
-![Pelita — a chat about an attached brief, in dark theme](docs/images/screenshot-dark.png)
+![Pelita — a chat answering from an attached brief](docs/images/pelita-chat.png)
 
 ## Quick start
 
@@ -46,7 +46,7 @@ default.
 |---|---|
 | **Streaming chat** | Token-by-token over SSE, with a stop button that cancels on the server and keeps the partial answer |
 | **Web search** | Optional per message. Shows "Searching the web…" while it runs and lists numbered sources under the answer |
-| **Attached files** | Text, PDF and Word files — three per chat, 5 MB each. Ask about any of them, including across files |
+| **Attached files** | Text, PDF and Word files — three per chat, 5 MB each. Each appears as a card on the message that sent it, and stays readable for the rest of the chat |
 | **News strip** | Headlines on the new-chat screen, pulled from an MCP server via the official Python SDK and cached for 30 minutes |
 | **Token and cost accounting** | Per message and per conversation, labelled as provider-reported or estimated so a total is never quietly a guess |
 | **Language auto-detection** | Replies in the language of your first message. Verified for Bahasa Melayu, English, Tamil, Chinese and Bengali |
@@ -133,7 +133,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-502 backend tests and 38 frontend tests, 86% backend coverage. The
+508 backend tests and 38 frontend tests, 86% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.

@@ -96,6 +96,35 @@ flag, no special case in the turn. A feature landing as one contributor plus one
 registry line is the claim the pipeline was built to make, and this is the first
 feature to test it.
 
+### A file is pending until a message sends it
+
+A file is uploaded the moment it is picked, which is before there is a message
+to hang it on. So `documents.message_id` is null until the user actually sends
+something, and `_begin_turn` binds every unbound file in the conversation to the
+message it is persisting — in the same transaction, so the composer and the
+transcript cannot disagree after a reload.
+
+That one nullable column is the whole state model:
+
+| `message_id` | means | where it shows |
+|---|---|---|
+| null | picked, not sent | a removable chip in the composer |
+| set | sent | a card above that message, permanently |
+
+The card is where a file belongs once it has been sent. Leaving it in the
+composer forever makes it look like it never arrived, and gives no answer to
+"which question did I attach that to?" three turns later. It has no remove
+button: the model has already read the file, and taking the card away would not
+take that back.
+
+The limit counts **every** file in the conversation, not the pending ones —
+otherwise sending resets the count and a chat can hold any number of files. The
+Attach button disables itself at the limit and says why.
+
+Binding is wrapped like every other optional step: if it fails, the file is
+still read (the contributor loads by conversation, not by message), so the only
+loss is the card. Not worth failing a turn over.
+
 ### Attached files suppress pointless web search
 
 Asking "what's the deadline?" with a brief attached should read the brief, not
@@ -161,9 +190,11 @@ changes; the excerpt selector and the contributor work on text.
 and queries a vector store, and register it instead of this one. The prompt
 shape, the UI, the limits and the error messages all stay.
 
-**Per-file deletion in the UI** — the endpoint exists
+**Removing a sent file** — the endpoint exists
 (`DELETE /api/conversations/{id}/documents/{doc_id}`) and the composer chips
-call it. Removing a file frees its slot immediately.
+call it for pending files. Wiring it to the transcript cards is a UI change
+only; the foreign key is `ON DELETE SET NULL`, so the file survives its message
+being deleted.
 
 **Keeping the original bytes** — add a column or an object-storage key next to
 the extracted text. Nothing reads the original today, so nothing breaks.
@@ -189,7 +220,10 @@ the extracted text. Nothing reads the original today, so nothing breaks.
   before reading, which is the problem being solved.
 - **Files are re-sent every turn.** There is no caching of the excerpt between
   turns, so a long conversation over three files pays the document budget each
-  time.
+  time. A file attached at turn one is still read at turn ten — which is the
+  feature, and also the cost.
+- **A card cannot be removed from the transcript.** Deleting the file is
+  possible through the API; the UI only offers it while the file is pending.
 - **The original file cannot be downloaded back**, because it is not kept.
 - **No virus scanning.** Text is extracted, never executed, and the bytes are
   discarded — but a fork exposing this to the public internet should put a
@@ -200,7 +234,7 @@ the extracted text. Nothing reads the original today, so nothing breaks.
 
 ## Tests
 
-`backend/tests/test_documents.py` — 43 tests:
+`backend/tests/test_documents.py` — 49 tests:
 
 - **Classification** by extension over media type, including the
   `octet-stream` `.md` case, and unsupported types naming themselves.
@@ -219,6 +253,10 @@ the extracted text. Nothing reads the original today, so nothing breaks.
   in the oversize error, the file-count limit, empty files, unsupported types,
   another user's conversation returning not-found, listing oldest first, deletion
   freeing a slot, and deleting someone else's file returning not-found.
+- **Binding**: a new file belonging to no message, sending binding every pending
+  file, a second send leaving the first message's cards alone, sending nothing
+  binding nothing, a sent file still counting against the limit, and a sent file
+  still being read on later turns.
 
 `frontend/src/lib/api.test.ts` — `FormData` must not get a JSON content type.
 Forcing one destroys the multipart boundary and the server rejects the upload
@@ -235,3 +273,9 @@ All three limit errors rendered in the chat. A 2.1 MB file (360,000 tokens)
 correctly surfaced its payment-terms paragraph alongside a second file. With
 files attached, "what is the deadline?" answered from the file without searching;
 "what's the latest on this?" still searched.
+
+Cards were verified **after a reload**, which is a different code path from the
+live one and is where this class of bug hides: two files attached at different
+points in one chat came back on their own messages rather than both on the
+newest, the composer came back empty, and Attach was disabled at the limit with
+"This chat has reached its file limit".

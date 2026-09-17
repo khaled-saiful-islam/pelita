@@ -10,6 +10,9 @@ class DocumentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    # Null while the file is still in the composer; set to the user message it
+    # was sent with, which is where the transcript renders its card.
+    message_id: UUID | None = None
     filename: str
     media_type: str
     size_bytes: int
