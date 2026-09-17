@@ -146,8 +146,8 @@ apart when a conversation is loaded.
 
 Getting this wrong is invisible while streaming and obvious afterwards: the grid
 appeared during the answer and came back as a list of links on refresh, because
-the stored rows arrived in  and nothing moved them into . The
-API response also has to carry  and , or there is
+the stored rows arrived in `sources` and nothing moved them into `images`. The
+API response also has to carry `thumbnail_url` and `image_url`, or there is
 nothing to split on.
 
 ## Verified
