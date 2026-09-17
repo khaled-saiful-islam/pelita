@@ -3,6 +3,7 @@ import { Spinner } from '@/components/ui'
 import { AuthProvider, useAuth } from '@/lib/auth'
 import Chat from '@/pages/Chat'
 import Profile from '@/pages/Profile'
+import Settings from '@/pages/Settings'
 import SignIn from '@/pages/SignIn'
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
           <Route path="/" element={<Protected><Chat /></Protected>} />
           <Route path="/c/:conversationId" element={<Protected><Chat /></Protected>} />
           <Route path="/profile" element={<Protected><Profile /></Protected>} />
+          <Route path="/settings" element={<Protected><Settings /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

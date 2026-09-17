@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, LogOut, MoreHorizontal, PenSquare, Settings, Trash2, X } from 'lucide-react'
+import { Check, LogOut, MoreHorizontal, PenSquare, Settings, Trash2, User, X } from 'lucide-react'
 import { Button, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
@@ -106,8 +106,13 @@ export function Sidebar({
         <div className="flex items-center gap-1">
           <Link to="/profile" className="min-w-0 flex-1">
             <Button variant="ghost" size="sm" className="w-full justify-start truncate">
-              <Settings className="size-4 shrink-0" aria-hidden />
+              <User className="size-4 shrink-0" aria-hidden />
               <span className="truncate">{user?.display_name ?? user?.username}</span>
+            </Button>
+          </Link>
+          <Link to="/settings">
+            <Button variant="ghost" size="icon" aria-label="Settings">
+              <Settings className="size-4" aria-hidden />
             </Button>
           </Link>
           <Button variant="ghost" size="icon" onClick={signOut} aria-label="Sign out">

@@ -108,6 +108,7 @@ export interface UseChat {
   language: string | null
   totals: Totals | null
   currency: string
+  suggestions: string[]
   send: (content: string, options?: { useSearch?: boolean }) => Promise<void>
   regenerate: (assistantMessageId: string) => Promise<void>
   rate: (messageId: string, rating: Rating | null, reason?: string) => void
@@ -125,6 +126,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   const [ratings, setRatings] = useState<Record<string, Rating>>({})
   const [language, setLanguage] = useState<string | null>(null)
   const [totals, setTotals] = useState<Totals | null>(null)
+  const [suggestions, setSuggestions] = useState<string[]>([])
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
@@ -148,6 +150,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setRatings({})
     setLanguage(null)
     setTotals(null)
+    setSuggestions([])
   }, [])
 
   const load = useCallback(async (id: string) => {
@@ -164,6 +167,8 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     )
     setLanguage(detail.language)
     setTotals(detail.totals)
+    // Chips are per-turn and not persisted; a reloaded conversation has none.
+    setSuggestions([])
     setStreaming(false)
   }, [])
 
@@ -190,6 +195,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     async (body: StreamBody, onStart: (start: StartPayload) => void) => {
       setError(null)
       setStreaming(true)
+      setSuggestions([])
       pendingToolsRef.current = []
 
       const controller = new AbortController()
@@ -259,6 +265,10 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               setMessages((current) =>
                 current.map((m) => (m.id === id ? { ...m, content: m.content + text } : m)),
               )
+              break
+            }
+            case 'suggestions': {
+              setSuggestions((payload.items as string[]) ?? [])
               break
             }
             case 'usage': {
@@ -415,6 +425,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     language,
     totals,
     currency: totals?.currency ?? 'USD',
+    suggestions,
     send,
     regenerate,
     rate,

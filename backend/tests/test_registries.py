@@ -41,27 +41,38 @@ def test_switching_provider_needs_no_code_change() -> None:
         assert provider.info.model == model
 
 
-def test_contributors_are_returned_in_a_stable_documented_order() -> None:
+def test_contributors_match_the_documented_order() -> None:
+    """The registry docstring lists these values; they are the contract other
+    features slot into, so a change here should be deliberate."""
     contributors = build_contributors(settings_for())
-    assert [c.name for c in contributors] == [
-        "system_prompt",
-        "tool_results",
-        "history",
-        "user_message",
+    assert [(c.name, c.order) for c in contributors] == [
+        ("system_prompt", 100),
+        ("memory", 200),
+        ("tool_results", 300),
+        ("history", 400),
+        ("user_message", 500),
     ]
-    assert [c.order for c in contributors] == [100, 300, 400, 500]
 
 
-def test_contributor_orders_leave_room_for_new_ones() -> None:
-    """Gaps are the mechanism: memory at 200 and retrieval at 350 must still fit
-    between what is already registered, without renumbering anything."""
+def test_retrieval_can_still_be_slotted_in_without_renumbering() -> None:
+    """The template's central claim: adding RAG is one file at order 350.
+
+    Asserted as an invariant rather than against a fixed list, so it keeps
+    meaning something as more contributors are registered.
+    """
     orders = sorted(c.order for c in build_contributors(settings_for()))
-    for reserved in (200, 350):
-        assert reserved not in orders
-        assert min(orders) < reserved < max(orders)
+    assert 350 not in orders
+    assert min(orders) < 350 < max(orders)
 
 
-def test_the_registry_order_is_independent_of_declaration_order() -> None:
-    """build_messages sorts by `order`, so the tuple can be rearranged safely."""
-    contributors = build_contributors(settings_for())
-    assert sorted(c.order for c in contributors) == [c.order for c in contributors]
+def test_every_contributor_has_a_distinct_order() -> None:
+    """Equal orders sort unpredictably, so the prompt would vary run to run."""
+    orders = [c.order for c in build_contributors(settings_for())]
+    assert len(orders) == len(set(orders))
+
+
+def test_the_registry_is_already_in_order() -> None:
+    """build_messages sorts anyway, but a registry that reads in execution order
+    is the one people can reason about."""
+    orders = [c.order for c in build_contributors(settings_for())]
+    assert orders == sorted(orders)

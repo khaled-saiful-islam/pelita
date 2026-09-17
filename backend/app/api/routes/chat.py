@@ -26,6 +26,7 @@ from app.services.chat_service import (
     ErrorEvent,
     SourcesEvent,
     StartEvent,
+    SuggestionsEvent,
     ToolEvent,
 )
 from app.services.feedback_service import FeedbackService
@@ -84,6 +85,8 @@ def _to_sse(event: object) -> dict[str, str] | None:
             }
         case AccountingEvent():
             return {"event": "usage", "data": json.dumps(event.accounting.as_event())}
+        case SuggestionsEvent():
+            return {"event": "suggestions", "data": json.dumps({"items": list(event.items)})}
         case ErrorEvent():
             return {"event": "error", "data": json.dumps({"message": event.message})}
         case DoneEvent():

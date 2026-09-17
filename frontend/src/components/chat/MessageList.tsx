@@ -15,12 +15,15 @@ export function MessageList({
   currency,
   onRate,
   onRegenerate,
+  footer,
 }: {
   messages: ChatMessage[]
   ratings: Record<string, Rating>
   currency: string
   onRate: (messageId: string, rating: Rating | null, reason?: string) => void
   onRegenerate: (messageId: string) => void
+  /** Rendered after the last message — follow-up chips live here. */
+  footer?: React.ReactNode
 }) {
   const bottom = useRef<HTMLDivElement>(null)
   const container = useRef<HTMLDivElement>(null)
@@ -62,6 +65,7 @@ export function MessageList({
             />
           ))}
         </div>
+        {footer}
         <div ref={bottom} className="h-px" />
       </div>
     </div>

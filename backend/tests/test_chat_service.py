@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.context.contributors import (
     HistoryContributor,
+    MemoryContributor,
     SystemPromptContributor,
     UserMessageContributor,
 )
@@ -45,6 +46,7 @@ from app.services.chat_service import (
     DoneEvent,
     ErrorEvent,
     StartEvent,
+    SuggestionsEvent,
 )
 
 
@@ -74,21 +76,33 @@ class FakeProvider:
         )
 
 
-def build_service(session: AsyncSession, provider, registry: CancellationRegistry) -> ChatService:
+def build_service(
+    session: AsyncSession,
+    provider,
+    registry: CancellationRegistry,
+    *,
+    memories_in_prompt: bool = False,
+    suggestions: bool = False,
+    extract: bool = False,
+) -> ChatService:
     @asynccontextmanager
     async def session_maker():
         # The test's session is already inside a rolled-back transaction, so
         # every "transaction" the service opens joins it and disappears after.
         yield session
 
+    def contributors(memories: tuple[str, ...]):
+        return (
+            SystemPromptContributor("You are Pelita."),
+            *((MemoryContributor(memories),) if memories_in_prompt else ()),
+            HistoryContributor(),
+            UserMessageContributor(),
+        )
+
     return ChatService(
         session_maker=session_maker,
         provider=provider,
-        contributors=(
-            SystemPromptContributor("You are Pelita."),
-            HistoryContributor(),
-            UserMessageContributor(),
-        ),
+        contributor_factory=contributors,
         cancellation=registry,
         budget=TokenBudget(memory=256, tools=512, history=1024),
         max_tokens=256,
@@ -98,6 +112,11 @@ def build_service(session: AsyncSession, provider, registry: CancellationRegistr
         ),
         supported_languages=["en", "ms", "ta", "zh", "bn"],
         default_language="en",
+        # Off by default so most tests exercise one provider call and assert on
+        # the turn rather than on the follow-up work that trails it.
+        suggestions_enabled=suggestions,
+        memory_auto_extract=extract,
+        memory_max_per_user=100,
     )
 
 
@@ -452,3 +471,68 @@ async def test_the_language_is_detected_once_not_per_turn(session, db_user, regi
 
     second = await collect(service, user_id=db_user.id, conversation_id=cid, content="ok thanks")
     assert second[0].language == "ms"
+
+
+# --- memory and suggestions in the turn ---------------------------------
+
+
+async def test_enabled_memories_reach_the_prompt(session, db_user, registry) -> None:
+    from app.services.memory_service import MemoryService
+
+    memories = MemoryService(session)
+    await memories.add(db_user.id, "The user lives in Kuala Lumpur.")
+
+    provider = FakeProvider(["ok"])
+    service = build_service(session, provider, registry, memories_in_prompt=True)
+    await collect(service, user_id=db_user.id, conversation_id=None, content="where am I?")
+
+    prompt = " ".join(m.content for m in provider.received.messages)
+    assert "Kuala Lumpur" in prompt
+
+
+async def test_disabled_memories_do_not_reach_the_prompt(session, db_user, registry) -> None:
+    from app.services.memory_service import MemoryService
+
+    memories = MemoryService(session)
+    memory = await memories.add(db_user.id, "The user lives in Kuala Lumpur.")
+    await memories.update(db_user.id, memory.id, enabled=False)
+
+    provider = FakeProvider(["ok"])
+    service = build_service(session, provider, registry, memories_in_prompt=True)
+    await collect(service, user_id=db_user.id, conversation_id=None, content="where am I?")
+
+    prompt = " ".join(m.content for m in provider.received.messages)
+    assert "Kuala Lumpur" not in prompt
+
+
+async def test_suggestions_are_emitted_after_a_clean_finish(session, db_user, registry) -> None:
+    class WithSuggestions(FakeProvider):
+        async def complete(self, req):
+            return Completion(
+                text='["First follow-up?", "Second follow-up?"]',
+                usage=Usage(prompt_tokens=1, completion_tokens=1, source=UsageSource.ESTIMATED),
+            )
+
+    service = build_service(session, WithSuggestions(["answer"]), registry, suggestions=True)
+    events = await collect(service, user_id=db_user.id, conversation_id=None, content="a question")
+
+    chips = next(e.items for e in events if isinstance(e, SuggestionsEvent))
+    assert chips == ("First follow-up?", "Second follow-up?")
+
+
+async def test_no_suggestions_after_a_cancelled_answer(session, db_user, registry) -> None:
+    """Following up on a half-written answer wastes a call and reads as the app
+    not noticing it was stopped."""
+    service = build_service(
+        session, FakeProvider(list("abcdefghij"), delay=0.02), registry, suggestions=True
+    )
+    stream = service.stream_turn(user_id=db_user.id, conversation_id=None, content="count")
+
+    start = await anext(stream)
+    events = []
+    async for event in stream:
+        events.append(event)
+        if isinstance(event, DeltaEvent) and len(events) == 2:
+            registry.cancel(start.assistant_message_id)
+
+    assert not any(isinstance(e, SuggestionsEvent) for e in events)

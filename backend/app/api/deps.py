@@ -84,7 +84,7 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
     return ChatService(
         session_maker=session_scope,
         provider=build_provider(settings),
-        contributors=build_contributors(settings),
+        contributor_factory=lambda memories: build_contributors(settings, memories=memories),
         cancellation=cancellation_registry,
         budget=TokenBudget(
             memory=settings.memory_token_budget,
@@ -106,6 +106,10 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
             else None
         ),
         search_limit=settings.search_max_results,
+        suggestions_enabled=settings.suggestions_enabled,
+        suggestions_count=settings.suggestions_count,
+        memory_auto_extract=settings.memory_auto_extract,
+        memory_max_per_user=settings.memory_max_per_user,
     )
 
 

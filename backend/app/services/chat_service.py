@@ -42,6 +42,8 @@ from app.providers.base import UsageEvent as ProviderUsageEvent
 from app.services.accounting_service import Accounting, Pricing, price
 from app.services.cancellation import CancellationRegistry
 from app.services.language_service import detect_language
+from app.services.memory_service import MemoryService
+from app.services.suggestion_service import suggest
 from app.tools.serpapi import SearchProvider, SearchUnavailable
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,9 @@ HISTORY_MESSAGE_LIMIT = 50
 TITLE_MAX_LENGTH = 60
 
 SessionMaker = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+# Built per turn rather than once, because the memory contributor needs this
+# user's facts and those change between requests.
+ContributorFactory = Callable[[tuple[str, ...]], tuple[ContextContributor, ...]]
 
 
 # --- events surfaced to the API layer -----------------------------------
@@ -92,6 +97,11 @@ class AccountingEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class SuggestionsEvent:
+    items: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class DoneEvent:
     finish_reason: FinishReason
 
@@ -102,7 +112,14 @@ class ErrorEvent:
 
 
 ChatEvent = (
-    StartEvent | ToolEvent | SourcesEvent | DeltaEvent | AccountingEvent | DoneEvent | ErrorEvent
+    StartEvent
+    | ToolEvent
+    | SourcesEvent
+    | DeltaEvent
+    | AccountingEvent
+    | SuggestionsEvent
+    | DoneEvent
+    | ErrorEvent
 )
 
 
@@ -126,7 +143,7 @@ class ChatService:
         *,
         session_maker: SessionMaker,
         provider: LLMProvider,
-        contributors: tuple[ContextContributor, ...],
+        contributor_factory: ContributorFactory,
         cancellation: CancellationRegistry,
         budget: TokenBudget,
         max_tokens: int,
@@ -136,10 +153,14 @@ class ChatService:
         default_language: str,
         search: SearchProvider | None = None,
         search_limit: int = 5,
+        suggestions_enabled: bool = True,
+        suggestions_count: int = 3,
+        memory_auto_extract: bool = True,
+        memory_max_per_user: int = 100,
     ) -> None:
         self._session_maker = session_maker
         self._provider = provider
-        self._contributors = contributors
+        self._build_contributors = contributor_factory
         self._cancellation = cancellation
         self._budget = budget
         self._max_tokens = max_tokens
@@ -149,6 +170,10 @@ class ChatService:
         self._default_language = default_language
         self._search = search
         self._search_limit = search_limit
+        self._suggestions_enabled = suggestions_enabled
+        self._suggestions_count = suggestions_count
+        self._memory_auto_extract = memory_auto_extract
+        self._memory_max_per_user = memory_max_per_user
 
     # -- public ----------------------------------------------------------
 
@@ -226,7 +251,8 @@ class ChatService:
                 language=start.language,
                 tool_results=tool_results,
             )
-            messages, trace = await build_messages(turn, self._contributors)
+            memories = await self._memories_for(user_id)
+            messages, trace = await build_messages(turn, self._build_contributors(memories))
             request_messages = messages
             logger.info("prompt assembled for %s: %s", assistant_id, trace.as_dict())
 
@@ -270,6 +296,23 @@ class ChatService:
             )
 
         yield AccountingEvent(accounting=accounting)
+
+        answer = "".join(collected)
+        # Only after a clean finish. Suggesting follow-ups to a half-written or
+        # failed answer wastes a call and reads as the app not noticing.
+        if self._suggestions_enabled and finish is FinishReason.STOP and answer.strip():
+            items = await suggest(
+                self._provider,
+                user_message=content,
+                assistant_message=answer,
+                count=self._suggestions_count,
+            )
+            if items:
+                yield SuggestionsEvent(items=tuple(items))
+
+        if self._memory_auto_extract and finish is FinishReason.STOP and answer.strip():
+            await self._extract_memories(user_id, content, answer)
+
         if error is not None:
             yield ErrorEvent(message=error)
         yield DoneEvent(finish_reason=finish)
@@ -287,6 +330,36 @@ class ChatService:
         return self._cancellation.cancel(message_id)
 
     # -- internals -------------------------------------------------------
+
+    async def _memories_for(self, user_id: UUID) -> tuple[str, ...]:
+        """Enabled facts, newest first. Never raises."""
+        try:
+            async with self._session_maker() as session:
+                service = MemoryService(session, max_per_user=self._memory_max_per_user)
+                found = await service.list_for(user_id, enabled_only=True)
+                return tuple(m.content for m in found)
+        except Exception:  # noqa: BLE001 - losing memory degrades, never breaks
+            logger.exception("could not load memories for %s", user_id)
+            return ()
+
+    async def _extract_memories(self, user_id: UUID, question: str, answer: str) -> None:
+        """Propose and store new facts. Never raises, never duplicates."""
+        try:
+            async with self._session_maker() as session:
+                service = MemoryService(session, max_per_user=self._memory_max_per_user)
+                facts = await service.extract(
+                    self._provider, user_message=question, assistant_message=answer
+                )
+                for fact in facts:
+                    try:
+                        await service.add(user_id, fact, source="extracted")
+                    except ValidationError:
+                        # Duplicate, too long, or at the limit. Skip and move on.
+                        continue
+                if facts:
+                    logger.info("extracted %d memories for %s", len(facts), user_id)
+        except Exception:  # noqa: BLE001 - extraction is best-effort
+            logger.exception("memory extraction failed for %s", user_id)
 
     def _estimate(self, messages: tuple, collected: list[str]) -> Usage:
         """Count tokens ourselves when the provider did not report any."""

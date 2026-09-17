@@ -19,6 +19,7 @@ from __future__ import annotations
 from app.context.base import ContextContributor
 from app.context.contributors import (
     HistoryContributor,
+    MemoryContributor,
     SystemPromptContributor,
     ToolResultsContributor,
     UserMessageContributor,
@@ -26,10 +27,15 @@ from app.context.contributors import (
 from app.core.config import Settings, get_settings
 
 
-def build_contributors(settings: Settings | None = None) -> tuple[ContextContributor, ...]:
+def build_contributors(
+    settings: Settings | None = None,
+    *,
+    memories: tuple[str, ...] = (),
+) -> tuple[ContextContributor, ...]:
     settings = settings or get_settings()
     return (
         SystemPromptContributor(settings.system_prompt),
+        MemoryContributor(memories),
         ToolResultsContributor(),
         HistoryContributor(),
         UserMessageContributor(),

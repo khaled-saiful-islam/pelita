@@ -29,6 +29,44 @@ class SystemPromptContributor(ContextContributor):
         return [system("\n\n".join(parts))] if parts else []
 
 
+class MemoryContributor(ContextContributor):
+    """Remembered facts about the user.
+
+    Order 200: after the system prompt, before anything from this turn, so
+    standing facts read as background rather than as something just said.
+
+    Facts are passed in rather than fetched here, because a contributor that
+    opens a database session is a contributor that can make a turn fail on a
+    connection pool exhaustion.
+    """
+
+    name = "memory"
+    order = 200
+
+    def __init__(self, facts: tuple[str, ...] = ()) -> None:
+        self._facts = facts
+
+    async def contribute(self, ctx: TurnContext) -> list[ChatMessage]:
+        if not self._facts:
+            return []
+
+        header = "What you know about this user:"
+        lines = [header]
+        used = count_tokens(header, ctx.model)
+
+        for fact in self._facts:
+            cost = count_tokens(fact, ctx.model) + 2
+            if used + cost > ctx.budget.memory:
+                break
+            lines.append(f"- {fact}")
+            used += cost
+
+        # Only the header survived the budget, so there is nothing to say.
+        if len(lines) == 1:
+            return []
+        return [system("\n".join(lines))]
+
+
 class ToolResultsContributor(ContextContributor):
     """Search results and anything else a tool produced.
 

@@ -32,6 +32,12 @@ export default function Profile() {
       <div className="mt-8 space-y-6">
         <DetailsCard user={user} onSaved={updateUser} />
         <PasswordCard />
+        <p className="text-sm text-muted-foreground">
+          Looking for memory and theme?{' '}
+          <Link to="/settings" className="text-primary hover:underline">
+            Settings
+          </Link>
+        </p>
       </div>
     </main>
   )

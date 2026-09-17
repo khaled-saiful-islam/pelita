@@ -8,6 +8,7 @@ import { MessageList } from '@/components/chat/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { ConversationUsage } from '@/components/chat/Usage'
 import { NewsStrip } from '@/components/news/NewsStrip'
+import { Suggestions } from '@/components/chat/Suggestions'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
 import { useConfig } from '@/hooks/useConfig'
@@ -100,6 +101,13 @@ export default function Chat() {
             currency={chat.currency}
             onRate={chat.rate}
             onRegenerate={chat.regenerate}
+            footer={
+              <Suggestions
+                items={chat.suggestions}
+                disabled={chat.streaming}
+                onPick={(text) => void chat.send(text)}
+              />
+            }
           />
         )}
 
