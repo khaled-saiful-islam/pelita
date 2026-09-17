@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -43,6 +44,10 @@ class MessageResponse(BaseModel):
     finish_reason: str | None
     model: str | None
     created_at: datetime
+    prompt_tokens: int
+    completion_tokens: int
+    cost: Decimal
+    usage_source: str | None
 
 
 class ConversationSummary(BaseModel):
@@ -50,13 +55,26 @@ class ConversationSummary(BaseModel):
 
     id: UUID
     title: str
+    language: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class ConversationTotals(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost: Decimal
+    currency: str
+    # True when any message in the conversation was priced from an estimate, so
+    # the UI can say the total is approximate rather than implying precision.
+    estimated: bool
 
 
 class ConversationDetail(ConversationSummary):
     messages: list[MessageResponse]
     feedback: dict[UUID, FeedbackResponse] = {}
+    totals: ConversationTotals
 
 
 class ConversationList(BaseModel):

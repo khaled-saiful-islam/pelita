@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -35,8 +36,16 @@ from app.providers.base import (
     Usage,
     UsageSource,
 )
+from app.services.accounting_service import Pricing
 from app.services.cancellation import CancellationRegistry
-from app.services.chat_service import ChatService, DeltaEvent, DoneEvent, ErrorEvent, StartEvent
+from app.services.chat_service import (
+    AccountingEvent,
+    ChatService,
+    DeltaEvent,
+    DoneEvent,
+    ErrorEvent,
+    StartEvent,
+)
 
 
 class FakeProvider:
@@ -84,6 +93,11 @@ def build_service(session: AsyncSession, provider, registry: CancellationRegistr
         budget=TokenBudget(memory=256, tools=512, history=1024),
         max_tokens=256,
         temperature=0.5,
+        pricing=Pricing(
+            input_per_1m=Decimal("0.15"), output_per_1m=Decimal("0.60"), currency="USD"
+        ),
+        supported_languages=["en", "ms", "ta", "zh", "bn"],
+        default_language="en",
     )
 
 
@@ -109,6 +123,7 @@ async def test_a_turn_emits_start_tokens_then_done(session, db_user, registry) -
     assert [e.text for e in events if isinstance(e, DeltaEvent)] == ["Hel", "lo"]
     assert isinstance(events[-1], DoneEvent)
     assert events[-1].finish_reason is FinishReason.STOP
+    assert any(isinstance(e, AccountingEvent) for e in events)
 
 
 async def test_a_new_conversation_is_created_and_titled(session, db_user, registry) -> None:
@@ -151,7 +166,9 @@ async def test_the_prompt_is_built_by_the_contributors(session, db_user, registr
 
     roles = [m.role for m in provider.received.messages]
     assert roles == [Role.SYSTEM, Role.USER]
-    assert provider.received.messages[0].content == "You are Pelita."
+    # The system message carries the base prompt plus the detected-language
+    # instruction, in that order.
+    assert provider.received.messages[0].content.startswith("You are Pelita.")
     assert provider.received.messages[-1].content == "the question"
 
 
@@ -342,3 +359,96 @@ async def test_regenerating_an_unknown_message_is_not_found(session, db_user, re
         await collect(
             service, user_id=db_user.id, conversation_id=None, regenerate_of=uuid4()
         )
+
+
+# --- accounting ---------------------------------------------------------
+
+
+async def test_every_turn_reports_usage(session, db_user, registry) -> None:
+    service = build_service(session, FakeProvider(["some answer"]), registry)
+    events = await collect(service, user_id=db_user.id, conversation_id=None, content="hi there")
+
+    accounting = next(e.accounting for e in events if isinstance(e, AccountingEvent))
+    assert accounting.completion_tokens > 0
+    assert accounting.currency == "USD"
+
+
+async def test_usage_is_estimated_when_the_provider_reports_none(
+    session, db_user, registry
+) -> None:
+    """The fake provider sends no usage block, like Ollama and some vLLM builds."""
+    service = build_service(session, FakeProvider(["answer"]), registry)
+    events = await collect(service, user_id=db_user.id, conversation_id=None, content="hi there")
+
+    accounting = next(e.accounting for e in events if isinstance(e, AccountingEvent))
+    assert accounting.source is UsageSource.ESTIMATED
+
+
+async def test_accounting_is_persisted_on_the_message(session, db_user, registry) -> None:
+    service = build_service(session, FakeProvider(["answer"]), registry)
+    events = await collect(service, user_id=db_user.id, conversation_id=None, content="hi there")
+
+    stored = await session.get(Message, events[0].assistant_message_id)
+    assert stored.completion_tokens > 0
+    assert stored.usage_source == UsageSource.ESTIMATED
+
+
+async def test_a_cancelled_turn_is_still_priced(session, db_user, registry) -> None:
+    """Tokens consumed before the stop were still paid for."""
+    service = build_service(session, FakeProvider(list("abcdefghij"), delay=0.02), registry)
+    stream = service.stream_turn(user_id=db_user.id, conversation_id=None, content="count to ten")
+
+    start = await anext(stream)
+    events = []
+    async for event in stream:
+        events.append(event)
+        if isinstance(event, DeltaEvent) and len(events) == 3:
+            registry.cancel(start.assistant_message_id)
+
+    accounting = next(e.accounting for e in events if isinstance(e, AccountingEvent))
+    assert accounting.prompt_tokens > 0
+
+
+# --- language -----------------------------------------------------------
+
+
+async def test_the_language_is_detected_and_stored(session, db_user, registry) -> None:
+    service = build_service(session, FakeProvider(["jawapan"]), registry)
+    events = await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="Terangkan bagaimana angin monsun berfungsi di Asia Tenggara",
+    )
+
+    assert events[0].language == "ms"
+    conversation = await session.get(Conversation, events[0].conversation_id)
+    assert conversation.language == "ms"
+
+
+async def test_the_language_reaches_the_system_prompt(session, db_user, registry) -> None:
+    provider = FakeProvider(["ok"])
+    service = build_service(session, provider, registry)
+    await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="Terangkan bagaimana angin monsun berfungsi di Asia Tenggara",
+    )
+
+    assert "Bahasa Melayu" in provider.received.messages[0].content
+
+
+async def test_the_language_is_detected_once_not_per_turn(session, db_user, registry) -> None:
+    """Re-detecting every turn would flip the reply language on a short "ok"."""
+    service = build_service(session, FakeProvider(["ok"]), registry)
+    first = await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="Terangkan bagaimana angin monsun berfungsi di Asia Tenggara",
+    )
+    cid = first[0].conversation_id
+
+    second = await collect(service, user_id=db_user.id, conversation_id=cid, content="ok thanks")
+    assert second[0].language == "ms"

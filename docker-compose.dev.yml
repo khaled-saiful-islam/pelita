@@ -1,0 +1,11 @@
+# Development overlay: source is mounted and the API reloads on save.
+#
+# Not merged into docker-compose.yml, because `make up` should build the image
+# it would actually deploy. Used by `make dev`:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  api:
+    volumes:
+      - ./backend:/srv
+    command:
+      ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

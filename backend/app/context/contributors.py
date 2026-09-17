@@ -9,6 +9,7 @@ from __future__ import annotations
 from app.context.base import ContextContributor, TurnContext, assistant, system, user
 from app.context.pipeline import trim_to_budget
 from app.providers.base import ChatMessage, Role
+from app.services.language_service import reply_instruction
 
 
 class SystemPromptContributor(ContextContributor):
@@ -21,7 +22,10 @@ class SystemPromptContributor(ContextContributor):
         self._prompt = prompt.strip()
 
     async def contribute(self, ctx: TurnContext) -> list[ChatMessage]:
-        return [system(self._prompt)] if self._prompt else []
+        parts = [self._prompt] if self._prompt else []
+        if ctx.language:
+            parts.append(reply_instruction(ctx.language))
+        return [system("\n\n".join(parts))] if parts else []
 
 
 class HistoryContributor(ContextContributor):

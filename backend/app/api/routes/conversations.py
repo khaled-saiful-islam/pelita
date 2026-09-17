@@ -12,11 +12,14 @@ from app.api.schemas.chat import (
     ConversationDetail,
     ConversationList,
     ConversationSummary,
+    ConversationTotals,
     FeedbackResponse,
+    MessageResponse,
     RenameConversationRequest,
 )
 from app.core.errors import NotFoundError
 from app.db.repositories.conversations import SqlConversationRepository
+from app.services.accounting_service import Pricing, summarise
 from app.services.chat_service import list_conversations
 from app.services.export_service import filename_for, to_markdown
 from app.services.feedback_service import FeedbackService
@@ -41,7 +44,12 @@ async def index(
 
 
 @router.get("/{conversation_id}", response_model=ConversationDetail)
-async def show(conversation_id: UUID, session: SessionDep, user: CurrentUser) -> ConversationDetail:
+async def show(
+    conversation_id: UUID,
+    session: SessionDep,
+    user: CurrentUser,
+    settings: SettingsDep,
+) -> ConversationDetail:
     conversation = await SqlConversationRepository(session).get(conversation_id, user.id)
     if conversation is None:
         # Someone else's conversation and a missing one give the same answer, so
@@ -53,11 +61,23 @@ async def show(conversation_id: UUID, session: SessionDep, user: CurrentUser) ->
     ratings = await FeedbackService(session).for_conversation(
         user_id=user.id, conversation_id=conversation_id
     )
-    detail = ConversationDetail.model_validate(conversation)
-    detail.feedback = {
-        message_id: FeedbackResponse.model_validate(f) for message_id, f in ratings.items()
-    }
-    return detail
+    # Built explicitly rather than validated from the ORM object, because
+    # totals and feedback are computed and have nowhere to come from otherwise.
+    return ConversationDetail(
+        id=conversation.id,
+        title=conversation.title,
+        language=conversation.language,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        messages=[MessageResponse.model_validate(m) for m in conversation.messages],
+        feedback={
+            message_id: FeedbackResponse.model_validate(f)
+            for message_id, f in ratings.items()
+        },
+        totals=ConversationTotals(
+            **summarise(conversation.messages, Pricing.from_settings(settings))
+        ),
+    )
 
 
 @router.get("/{conversation_id}/export", response_class=PlainTextResponse)

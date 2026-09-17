@@ -3,17 +3,20 @@ import { AlertCircle } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { Markdown } from './Markdown'
 import { MessageActions } from './MessageActions'
+import { MessageUsage } from './Usage'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, Rating } from '@/hooks/useChat'
 
 export function MessageList({
   messages,
   ratings,
+  currency,
   onRate,
   onRegenerate,
 }: {
   messages: ChatMessage[]
   ratings: Record<string, Rating>
+  currency: string
   onRate: (messageId: string, rating: Rating | null, reason?: string) => void
   onRegenerate: (messageId: string) => void
 }) {
@@ -48,6 +51,7 @@ export function MessageList({
               key={message.id}
               message={message}
               rating={ratings[message.id] ?? null}
+              currency={currency}
               // Only the latest answer can be regenerated: redoing an earlier
               // one would orphan every exchange after it.
               canRegenerate={index === messages.length - 1 && message.role === 'assistant'}
@@ -65,12 +69,14 @@ export function MessageList({
 function MessageRow({
   message,
   rating,
+  currency,
   canRegenerate,
   onRate,
   onRegenerate,
 }: {
   message: ChatMessage
   rating: Rating | null
+  currency: string
   canRegenerate: boolean
   onRate: (messageId: string, rating: Rating | null, reason?: string) => void
   onRegenerate: (messageId: string) => void
@@ -109,13 +115,20 @@ function MessageRow({
       )}
 
       {!message.streaming && message.content.length > 0 && (
-        <MessageActions
-          content={message.content}
-          rating={rating}
-          canRegenerate={canRegenerate}
-          onRate={(next, reason) => onRate(message.id, next, reason)}
-          onRegenerate={() => onRegenerate(message.id)}
-        />
+        <div className="mt-1 flex flex-wrap items-center gap-x-3">
+          <MessageActions
+            content={message.content}
+            rating={rating}
+            canRegenerate={canRegenerate}
+            onRate={(next, reason) => onRate(message.id, next, reason)}
+            onRegenerate={() => onRegenerate(message.id)}
+          />
+          <MessageUsage
+            message={message}
+            currency={currency}
+            className="opacity-0 transition-opacity group-hover/message:opacity-100"
+          />
+        </div>
       )}
     </div>
   )

@@ -19,7 +19,13 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.deps import ChatServiceDep, CurrentUser, SessionDep
 from app.api.schemas.chat import FeedbackRequest, FeedbackResponse, SendMessageRequest
 from app.core.errors import PelitaError
-from app.services.chat_service import DeltaEvent, DoneEvent, ErrorEvent, StartEvent
+from app.services.chat_service import (
+    AccountingEvent,
+    DeltaEvent,
+    DoneEvent,
+    ErrorEvent,
+    StartEvent,
+)
 from app.services.feedback_service import FeedbackService
 
 logger = logging.getLogger(__name__)
@@ -39,11 +45,14 @@ def _to_sse(event: object) -> dict[str, str] | None:
                         "user_message_id": str(event.user_message_id),
                         "assistant_message_id": str(event.assistant_message_id),
                         "title": event.title,
+                        "language": event.language,
                     }
                 ),
             }
         case DeltaEvent():
             return {"event": "token", "data": json.dumps({"text": event.text})}
+        case AccountingEvent():
+            return {"event": "usage", "data": json.dumps(event.accounting.as_event())}
         case ErrorEvent():
             return {"event": "error", "data": json.dumps({"message": event.message})}
         case DoneEvent():

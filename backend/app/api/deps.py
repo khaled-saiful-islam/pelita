@@ -21,6 +21,7 @@ from app.db.repositories.users import SqlUserRepository
 from app.db.session import SessionFactory, session_scope
 from app.providers.base import TokenBudget
 from app.providers.registry import build_provider
+from app.services.accounting_service import Pricing
 from app.services.auth_service import AuthService
 from app.services.cancellation import registry as cancellation_registry
 from app.services.chat_service import ChatService
@@ -91,6 +92,9 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
         ),
         max_tokens=settings.llm_max_tokens,
         temperature=settings.llm_temperature,
+        pricing=Pricing.from_settings(settings),
+        supported_languages=settings.supported_language_list,
+        default_language=settings.default_language,
     )
 
 

@@ -6,6 +6,7 @@ import { Logo } from '@/components/Logo'
 import { Composer } from '@/components/chat/Composer'
 import { MessageList } from '@/components/chat/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'
+import { ConversationUsage } from '@/components/chat/Usage'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
 
@@ -66,6 +67,8 @@ export default function Chat() {
         {!empty && (
           <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
             <h1 className="truncate text-sm font-medium">{chat.title}</h1>
+            <div className="flex shrink-0 items-center gap-3">
+              {chat.totals && <ConversationUsage totals={chat.totals} />}
             {activeId && (
               // A plain link, not fetch-and-blob: the browser already knows how
               // to save a file the server marked as an attachment.
@@ -81,6 +84,7 @@ export default function Chat() {
                 </Button>
               </a>
             )}
+            </div>
           </header>
         )}
 
@@ -90,6 +94,7 @@ export default function Chat() {
           <MessageList
             messages={chat.messages}
             ratings={chat.ratings}
+            currency={chat.currency}
             onRate={chat.rate}
             onRegenerate={chat.regenerate}
           />

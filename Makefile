@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 COMPOSE := docker compose
+COMPOSE_DEV := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
 # Ports come from .env when it exists, so the banner cannot print a stale one.
 env_or = $(shell grep -E '^$(1)=' .env 2>/dev/null | cut -d= -f2- | grep . || echo $(2))
@@ -87,9 +88,13 @@ lint: ## Lint backend and frontend
 	@$(NODE) "npm install --silent --no-audit --no-fund && npm run lint"
 
 dev: .env ## Run with hot reload on both sides
-	@$(COMPOSE) up -d --build --wait db api
-	@echo "$(AMBER)API on http://localhost:$(API_PORT)$(RESET) — starting Vite with HMR"
+	@$(COMPOSE_DEV) up -d --build --wait db api
+	@echo "$(AMBER)API on http://localhost:$(API_PORT)$(RESET) reloads on save — starting Vite with HMR"
 	@cd frontend && npm install && npm run dev
+
+api-dev: .env ## API only, with hot reload (no Vite)
+	@$(COMPOSE_DEV) up -d --build --wait db api
+	@echo "$(AMBER)API on http://localhost:$(API_PORT)$(RESET) — reloads on save"
 
 reset: ## Destroy everything including the database, then start clean
 	@echo "$(BOLD)This deletes the database volume.$(RESET)"

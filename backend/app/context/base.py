@@ -37,6 +37,8 @@ class TurnContext:
     model: str
     history: tuple[StoredMessage, ...] = ()
     budget: TokenBudget = TokenBudget(memory=512, tools=2048, history=4096)
+    # ISO 639-1 of the conversation, or None before detection has run.
+    language: str | None = None
 
 
 @runtime_checkable

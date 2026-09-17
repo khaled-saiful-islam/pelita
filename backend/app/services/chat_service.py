@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.context.base import ContextContributor, StoredMessage, TurnContext
 from app.context.pipeline import build_messages
 from app.core.errors import NotFoundError, ValidationError
+from app.core.tokens import count_message_tokens, count_tokens
 from app.db.models.conversation import Conversation, Message
 from app.db.repositories.conversations import SqlConversationRepository
 from app.providers.base import (
@@ -32,8 +33,13 @@ from app.providers.base import (
     Role,
     TokenBudget,
     TokenEvent,
+    Usage,
+    UsageSource,
 )
+from app.providers.base import UsageEvent as ProviderUsageEvent
+from app.services.accounting_service import Accounting, Pricing, price
 from app.services.cancellation import CancellationRegistry
+from app.services.language_service import detect_language
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +59,17 @@ class StartEvent:
     user_message_id: UUID
     assistant_message_id: UUID
     title: str
+    language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class DeltaEvent:
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class AccountingEvent:
+    accounting: Accounting
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +82,7 @@ class ErrorEvent:
     message: str
 
 
-ChatEvent = StartEvent | DeltaEvent | DoneEvent | ErrorEvent
+ChatEvent = StartEvent | DeltaEvent | AccountingEvent | DoneEvent | ErrorEvent
 
 
 def derive_title(text: str) -> str:
@@ -98,6 +110,9 @@ class ChatService:
         budget: TokenBudget,
         max_tokens: int,
         temperature: float,
+        pricing: Pricing,
+        supported_languages: list[str],
+        default_language: str,
     ) -> None:
         self._session_maker = session_maker
         self._provider = provider
@@ -106,6 +121,9 @@ class ChatService:
         self._budget = budget
         self._max_tokens = max_tokens
         self._temperature = temperature
+        self._pricing = pricing
+        self._supported_languages = supported_languages
+        self._default_language = default_language
 
     # -- public ----------------------------------------------------------
 
@@ -136,6 +154,8 @@ class ChatService:
         collected: list[str] = []
         finish = FinishReason.STOP
         error: str | None = None
+        usage: Usage | None = None
+        request_messages: tuple = ()
 
         try:
             turn = TurnContext(
@@ -145,8 +165,10 @@ class ChatService:
                 model=self._provider.info.model,
                 history=history,
                 budget=self._budget,
+                language=start.language,
             )
             messages, trace = await build_messages(turn, self._contributors)
+            request_messages = messages
             logger.info("prompt assembled for %s: %s", assistant_id, trace.as_dict())
 
             request = ChatRequest(
@@ -164,6 +186,8 @@ class ChatService:
                 if isinstance(event, TokenEvent):
                     collected.append(event.text)
                     yield DeltaEvent(text=event.text)
+                elif isinstance(event, ProviderUsageEvent):
+                    usage = event.usage
 
         except ProviderError as exc:
             finish = FinishReason.ERROR
@@ -175,10 +199,16 @@ class ChatService:
             logger.exception("unexpected failure during turn %s", assistant_id)
         finally:
             self._cancellation.release(assistant_id)
+            # A cancelled or failed turn still consumed tokens, so it is still
+            # priced. Usage the provider never sent is estimated instead.
+            accounting = price(
+                usage or self._estimate(request_messages, collected), self._pricing
+            )
             # Persist whatever arrived, even on error or cancellation. A partial
             # answer the user watched appear should still be there on reload.
-            await self._finish_turn(assistant_id, "".join(collected), finish)
+            await self._finish_turn(assistant_id, "".join(collected), finish, accounting)
 
+        yield AccountingEvent(accounting=accounting)
         if error is not None:
             yield ErrorEvent(message=error)
         yield DoneEvent(finish_reason=finish)
@@ -196,6 +226,14 @@ class ChatService:
         return self._cancellation.cancel(message_id)
 
     # -- internals -------------------------------------------------------
+
+    def _estimate(self, messages: tuple, collected: list[str]) -> Usage:
+        """Count tokens ourselves when the provider did not report any."""
+        return Usage(
+            prompt_tokens=count_message_tokens(messages, self._provider.info.model),
+            completion_tokens=count_tokens("".join(collected), self._provider.info.model),
+            source=UsageSource.ESTIMATED,
+        )
 
     async def _begin_turn(
         self, user_id: UUID, conversation_id: UUID | None, content: str
@@ -219,6 +257,18 @@ class ChatService:
                 if conversation.title == "New chat":
                     conversation.title = derive_title(content)
 
+            # Detected once, from the first message, then reused. Re-detecting
+            # every turn would make the reply language flip on a short "ok".
+            if conversation.language is None:
+                conversation.language = detect_language(
+                    content,
+                    supported=self._supported_languages,
+                    default=self._default_language,
+                )
+                logger.info(
+                    "conversation %s detected as %s", conversation.id, conversation.language
+                )
+
             history = await repo.recent_messages(
                 conversation.id, limit=HISTORY_MESSAGE_LIMIT
             )
@@ -241,6 +291,7 @@ class ChatService:
                 user_message_id=user_message.id,
                 assistant_message_id=assistant_message.id,
                 title=conversation.title,
+                language=conversation.language,
             )
             stored = tuple(
                 StoredMessage(role=Role(m.role), content=m.content) for m in history
@@ -289,12 +340,17 @@ class ChatService:
                 user_message_id=ordered[-2].id,
                 assistant_message_id=target.id,
                 title=conversation.title,
+                language=conversation.language,
             )
 
         return start, history, question
 
     async def _finish_turn(
-        self, assistant_id: UUID, content: str, finish: FinishReason
+        self,
+        assistant_id: UUID,
+        content: str,
+        finish: FinishReason,
+        accounting: Accounting,
     ) -> None:
         async with self._session_maker() as session:
             repo = SqlConversationRepository(session)
@@ -304,6 +360,10 @@ class ChatService:
                 return
             message.content = content
             message.finish_reason = finish
+            message.prompt_tokens = accounting.prompt_tokens
+            message.completion_tokens = accounting.completion_tokens
+            message.cost = accounting.cost
+            message.usage_source = str(accounting.source)
 
 
 async def list_conversations(

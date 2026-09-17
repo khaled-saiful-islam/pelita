@@ -20,9 +20,24 @@ export interface ChatMessage {
   finish_reason: string | null
   model: string | null
   created_at: string
+  prompt_tokens: number
+  completion_tokens: number
+  cost: string | number
+  /** 'provider' when the model reported the counts, 'estimated' when we did. */
+  usage_source: string | null
   /** True only for the message currently being written. */
   streaming?: boolean
   error?: string | null
+}
+
+export interface Totals {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost: string | number
+  currency: string
+  /** True when any message was priced from an estimate. */
+  estimated: boolean
 }
 
 interface FeedbackRecord {
@@ -38,6 +53,8 @@ export interface ConversationDetail {
   updated_at: string
   messages: ChatMessage[]
   feedback: Record<string, FeedbackRecord>
+  language: string | null
+  totals: Totals
 }
 
 interface StartPayload {
@@ -45,6 +62,16 @@ interface StartPayload {
   user_message_id: string
   assistant_message_id: string
   title: string
+  language: string | null
+}
+
+interface UsagePayload {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost: number
+  currency: string
+  source: string
 }
 
 interface StreamBody {
@@ -60,6 +87,9 @@ export interface UseChat {
   streaming: boolean
   error: string | null
   ratings: Record<string, Rating>
+  language: string | null
+  totals: Totals | null
+  currency: string
   send: (content: string) => Promise<void>
   regenerate: (assistantMessageId: string) => Promise<void>
   rate: (messageId: string, rating: Rating | null, reason?: string) => void
@@ -75,6 +105,8 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [ratings, setRatings] = useState<Record<string, Rating>>({})
+  const [language, setLanguage] = useState<string | null>(null)
+  const [totals, setTotals] = useState<Totals | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
@@ -93,6 +125,8 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setStreaming(false)
     setError(null)
     setRatings({})
+    setLanguage(null)
+    setTotals(null)
   }, [])
 
   const load = useCallback(async (id: string) => {
@@ -107,6 +141,8 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         Object.entries(detail.feedback ?? {}).map(([id, f]) => [id, f.rating]),
       ),
     )
+    setLanguage(detail.language)
+    setTotals(detail.totals)
     setStreaming(false)
   }, [])
 
@@ -163,6 +199,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               assistantIdRef.current = start.assistant_message_id
               setConversationId(start.conversation_id)
               setTitle(start.title)
+              setLanguage(start.language)
               onConversationStarted?.(start.conversation_id, start.title)
               onStart(start)
               break
@@ -174,6 +211,29 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               setMessages((current) =>
                 current.map((m) => (m.id === id ? { ...m, content: m.content + text } : m)),
               )
+              break
+            }
+            case 'usage': {
+              const u = payload as unknown as UsagePayload
+              const id = assistantIdRef.current
+              if (id) {
+                patchMessage(id, {
+                  prompt_tokens: u.prompt_tokens,
+                  completion_tokens: u.completion_tokens,
+                  cost: u.cost,
+                  usage_source: u.source,
+                })
+              }
+              // Roll into the running total rather than refetching: the server
+              // already told us what this turn cost.
+              setTotals((current) => ({
+                prompt_tokens: (current?.prompt_tokens ?? 0) + u.prompt_tokens,
+                completion_tokens: (current?.completion_tokens ?? 0) + u.completion_tokens,
+                total_tokens: (current?.total_tokens ?? 0) + u.total_tokens,
+                cost: Number(current?.cost ?? 0) + u.cost,
+                currency: u.currency,
+                estimated: (current?.estimated ?? false) || u.source === 'estimated',
+              }))
               break
             }
             case 'error': {
@@ -228,6 +288,10 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
           finish_reason: null,
           model: null,
           created_at: new Date().toISOString(),
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          cost: 0,
+          usage_source: null,
         },
       ])
 
@@ -291,6 +355,9 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     streaming,
     error,
     ratings,
+    language,
+    totals,
+    currency: totals?.currency ?? 'USD',
     send,
     regenerate,
     rate,
@@ -308,6 +375,10 @@ function blankAssistant(id: string): ChatMessage {
     finish_reason: null,
     model: null,
     created_at: new Date().toISOString(),
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    cost: 0,
+    usage_source: null,
     streaming: true,
   }
 }
