@@ -27,6 +27,7 @@ export interface ChatMessage {
   /** 'provider' when the model reported the counts, 'estimated' when we did. */
   usage_source: string | null
   sources?: Source[]
+  images?: ImageResult[]
   /** What tools ran for this answer, in order. */
   tools?: ToolActivity[]
   /** Guard findings for this turn. */
@@ -41,6 +42,16 @@ export interface Source {
   title: string
   url: string
   snippet: string
+}
+
+export interface ImageResult {
+  rank: number
+  title: string
+  /** The page the image appears on, not the image file. */
+  url: string
+  source: string
+  thumbnail_url: string
+  image_url: string
 }
 
 export interface GuardAlert {
@@ -281,6 +292,12 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               } else {
                 pendingToolsRef.current = mergeTool(pendingToolsRef.current, activity)
               }
+              break
+            }
+            case 'images': {
+              const id = assistantIdRef.current
+              if (!id) break
+              patchMessage(id, { images: (payload.images ?? []) as ImageResult[] })
               break
             }
             case 'sources': {

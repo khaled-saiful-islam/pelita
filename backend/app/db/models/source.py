@@ -30,4 +30,9 @@ class MessageSource(Base):
     snippet: Mapped[str] = mapped_column(Text, nullable=False, default="")
     rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # Set only for image-search results, so a reloaded conversation still
+    # shows the pictures rather than a list of bare links.
+    thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     __table_args__ = (Index("ix_message_sources_message", "message_id", "rank"),)

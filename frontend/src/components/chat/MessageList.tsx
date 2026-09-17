@@ -7,6 +7,7 @@ import { MessageUsage } from './Usage'
 import { Sources } from './Sources'
 import { ToolActivityList } from './ToolActivity'
 import { GuardBanner } from './GuardBanner'
+import { ImageGrid } from './ImageGrid'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, Rating } from '@/hooks/useChat'
 
@@ -110,11 +111,15 @@ function MessageRow({
         <ToolActivityList activities={message.tools} />
       )}
 
+      {message.images && message.images.length > 0 && (
+        <ImageGrid images={message.images} />
+      )}
+
       {waiting ? (
         <Working />
       ) : (
         <div className={cn('min-w-0', message.streaming && 'streaming-caret')}>
-          <Markdown content={message.content} />
+          <Markdown content={message.content} sources={message.sources ?? []} />
         </div>
       )}
 

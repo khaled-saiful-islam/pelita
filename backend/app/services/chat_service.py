@@ -15,6 +15,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from time import perf_counter
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,6 +106,11 @@ class SourcesEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class ImagesEvent:
+    images: tuple[ToolResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AccountingEvent:
     accounting: Accounting
 
@@ -129,12 +135,20 @@ ChatEvent = (
     | ToolEvent
     | GuardEventPayload
     | SourcesEvent
+    | ImagesEvent
     | DeltaEvent
     | AccountingEvent
     | SuggestionsEvent
     | DoneEvent
     | ErrorEvent
 )
+
+
+def _summarise(count: int, noun: str, started: float) -> str:
+    """"5 results in 1.2s" — the count alone does not say whether the wait was
+    the search or the model, which is the question when a turn feels slow."""
+    plural = "" if count == 1 else "s"
+    return f"{count} {noun}{plural} in {perf_counter() - started:.1f}s"
 
 
 def _guard_payload(verdict: GuardVerdict) -> GuardEventPayload:
@@ -176,6 +190,7 @@ class ChatService:
         default_language: str,
         search: SearchProvider | None = None,
         search_limit: int = 5,
+        image_limit: int = 6,
         guards: tuple[Guard, ...] = (),
         suggestions_enabled: bool = True,
         suggestions_count: int = 3,
@@ -194,6 +209,7 @@ class ChatService:
         self._default_language = default_language
         self._search = search
         self._search_limit = search_limit
+        self._image_limit = image_limit
         self._guards = guards
         self._suggestions_enabled = suggestions_enabled
         self._suggestions_count = suggestions_count
@@ -233,34 +249,67 @@ class ChatService:
         usage: Usage | None = None
         request_messages: tuple = ()
         tool_results: tuple[ToolResult, ...] = ()
+        image_results: tuple[ToolResult, ...] = ()
 
         try:
             for verdict in self._scan(content, ContentSource.USER_INPUT):
                 yield _guard_payload(verdict)
 
             tool_results: tuple[ToolResult, ...] = ()
+            image_results: tuple[ToolResult, ...] = ()
+            looking_for_images = False
             decision = await self._should_search(search_mode, content)
             if decision.needs_search and self._search is not None:
+                looking_for_images = decision.wants_images
                 yield ToolEvent(
                     tool=self._search.name,
                     status="running",
-                    label="Searching the web",
+                    label="Looking for images" if looking_for_images else "Searching the web",
                     detail=decision.reason,
                 )
+                started = perf_counter()
                 try:
-                    found = await self._search.search(content, limit=self._search_limit)
+                    if looking_for_images:
+                        images = await self._search.search_images(
+                            content, limit=self._image_limit
+                        )
+                        yield ToolEvent(
+                            tool=self._search.name,
+                            status="done",
+                            label="Found images",
+                            detail=_summarise(len(images), "image", started),
+                        )
+                        if images:
+                            yield ImagesEvent(images=tuple(images))
+                        # Images are shown, not read: they carry no text worth
+                        # putting in the prompt, so the model answers normally
+                        # while the grid renders alongside.
+                        image_results = tuple(images)
+
+                    # "Show me X" is answered by the pictures plus what the model
+                    # already knows. Running a text search as well doubles the
+                    # latency of the slowest part of the turn for prose nobody
+                    # asked for — and a second provider call is what pushed this
+                    # into a timeout whose failure chip then contradicted the
+                    # images that had just been found.
+                    found = (
+                        []
+                        if looking_for_images
+                        else await self._search.search(content, limit=self._search_limit)
+                    )
                     # Scanned before the contributor sees them. Retrieved pages
                     # are the realistic injection vector: nobody asked that page
                     # for instructions.
                     tool_results, verdicts = self._scan_results(found)
                     for verdict in verdicts:
                         yield _guard_payload(verdict)
-                    yield ToolEvent(
-                        tool=self._search.name,
-                        status="done",
-                        label="Searched the web",
-                        detail=f"{len(found)} result{'' if len(found) == 1 else 's'}",
-                    )
+                    if not looking_for_images:
+                        yield ToolEvent(
+                            tool=self._search.name,
+                            status="done",
+                            label="Searched the web",
+                            detail=_summarise(len(found), "result", started),
+                        )
                     if tool_results:
                         yield SourcesEvent(sources=tool_results)
                 except SearchUnavailable as exc:
@@ -283,7 +332,7 @@ class ChatService:
                 history=history,
                 budget=self._budget,
                 language=start.language,
-                tool_results=tool_results,
+                tool_results=(*tool_results, *image_results),
             )
             memories = await self._memories_for(user_id)
             messages, trace = await build_messages(turn, self._build_contributors(memories))
@@ -326,7 +375,11 @@ class ChatService:
             # Persist whatever arrived, even on error or cancellation. A partial
             # answer the user watched appear should still be there on reload.
             await self._finish_turn(
-                assistant_id, "".join(collected), finish, accounting, tool_results
+                assistant_id,
+                "".join(collected),
+                finish,
+                accounting,
+                (*tool_results, *image_results),
             )
 
         yield AccountingEvent(accounting=accounting)
@@ -601,6 +654,8 @@ class ChatService:
                         url=source.url,
                         snippet=source.snippet,
                         rank=source.rank,
+                        thumbnail_url=source.thumbnail_url or None,
+                        image_url=source.image_url or None,
                     )
                     for source in sources
                 ]

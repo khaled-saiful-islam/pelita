@@ -108,6 +108,7 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
         ),
         guards=build_guards(settings),
         search_limit=settings.search_max_results,
+        image_limit=settings.image_max_results,
         suggestions_enabled=settings.suggestions_enabled,
         suggestions_count=settings.suggestions_count,
         memory_auto_extract=settings.memory_auto_extract,

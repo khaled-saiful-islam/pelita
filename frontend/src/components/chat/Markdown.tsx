@@ -2,6 +2,9 @@ import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
+import { isCitationLabel, linkCitations } from '@/lib/citations'
+import { Citation } from './Citation'
+import type { Source } from '@/hooks/useChat'
 
 /**
  * Renders assistant output.
@@ -11,7 +14,17 @@ import { cn } from '@/lib/utils'
  * message re-renders on every token and re-parsing the whole document each time
  * is the difference between smooth and janky.
  */
-export const Markdown = memo(function Markdown({ content }: { content: string }) {
+export const Markdown = memo(function Markdown({
+  content,
+  sources = [],
+}: {
+  content: string
+  /** When present, inline [n] markers become links to the matching source. */
+  sources?: Source[]
+}) {
+  const body = linkCitations(content, sources)
+  const byRank = new Map(sources.map((source) => [source.rank, source]))
+
   return (
     <div className="text-[0.9375rem] leading-relaxed">
       <ReactMarkdown
@@ -24,16 +37,26 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
           ul: ({ children }) => <ul className="mb-4 ml-5 list-disc space-y-1.5 last:mb-0">{children}</ul>,
           ol: ({ children }) => <ol className="mb-4 ml-5 list-decimal space-y-1.5 last:mb-0">{children}</ol>,
           li: ({ children }) => <li className="pl-1">{children}</li>,
-          a: ({ children, href }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-primary underline underline-offset-2 hover:opacity-80"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ children, href }) => {
+            // A citation renders as a numbered chip with a hover preview rather
+            // than an underlined number, which would read as part of the
+            // sentence.
+            if (isCitationLabel(children)) {
+              const rank = Number(children)
+              const source = byRank.get(rank)
+              if (source) return <Citation rank={rank} source={source} />
+            }
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-primary underline underline-offset-2 hover:opacity-80"
+              >
+                {children}
+              </a>
+            )
+          },
           blockquote: ({ children }) => (
             <blockquote className="mb-4 border-l-2 border-border pl-4 text-muted-foreground last:mb-0">
               {children}
@@ -77,7 +100,7 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
           hr: () => <hr className="my-6 border-border" />,
         }}
       >
-        {content}
+        {body}
       </ReactMarkdown>
     </div>
   )

@@ -25,6 +25,7 @@ from app.services.chat_service import (
     DoneEvent,
     ErrorEvent,
     GuardEventPayload,
+    ImagesEvent,
     SourcesEvent,
     StartEvent,
     SuggestionsEvent,
@@ -76,6 +77,25 @@ def _to_sse(event: object) -> dict[str, str] | None:
                         "status": event.status,
                         "label": event.label,
                         "detail": event.detail,
+                    }
+                ),
+            }
+        case ImagesEvent():
+            return {
+                "event": "images",
+                "data": json.dumps(
+                    {
+                        "images": [
+                            {
+                                "rank": i.rank,
+                                "title": i.title,
+                                "url": i.url,
+                                "source": i.snippet,
+                                "thumbnail_url": i.thumbnail_url,
+                                "image_url": i.image_url,
+                            }
+                            for i in event.images
+                        ]
                     }
                 ),
             }

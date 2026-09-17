@@ -12,7 +12,12 @@ from app.context.base import TurnContext
 from app.context.contributors import ToolResultsContributor
 from app.providers.base import Role, TokenBudget, ToolResult
 from app.tools.news_mcp import NewsUnavailable, parse_feed
-from app.tools.serpapi import SearchUnavailable, SerpApiSearch, parse_results
+from app.tools.serpapi import (
+    SearchUnavailable,
+    SerpApiSearch,
+    parse_image_results,
+    parse_results,
+)
 
 # --- SerpAPI parsing ----------------------------------------------------
 
@@ -253,3 +258,136 @@ async def test_results_stop_at_the_token_budget() -> None:
 
 async def test_the_contributor_sits_between_memory_and_history() -> None:
     assert ToolResultsContributor().order == 300
+
+
+# --- image search -------------------------------------------------------
+
+
+def images(*results: dict) -> dict:
+    return {"images_results": list(results)}
+
+
+def image(**overrides) -> dict:
+    return {
+        "title": "Petronas Towers",
+        "link": "https://example.test/page",
+        "thumbnail": "https://thumbs.test/1.jpg",
+        "original": "https://originals.test/1.jpg",
+        "source": "Example",
+        "original_width": 1200,
+        "original_height": 900,
+        **overrides,
+    }
+
+
+def test_image_results_link_to_the_page_not_the_file() -> None:
+    """A picture with no context is not a source anyone can check."""
+    parsed = parse_image_results(images(image()), limit=6)
+    assert parsed[0].url == "https://example.test/page"
+    assert parsed[0].thumbnail_url == "https://thumbs.test/1.jpg"
+    assert parsed[0].image_url == "https://originals.test/1.jpg"
+    assert parsed[0].is_image
+
+
+def test_a_data_uri_thumbnail_is_kept_but_never_used_as_the_link() -> None:
+    parsed = parse_image_results(
+        images(image(link="", thumbnail="data:image/jpeg;base64,abc")), limit=6
+    )
+    assert parsed[0].thumbnail_url.startswith("data:image/")
+    assert parsed[0].url == "https://originals.test/1.jpg"
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "https://www.shutterstock.com/image/a",
+        "https://www.alamy.com/x",
+        "https://cdn.dreamstime.com/y",
+        "https://www.istockphoto.com/z",
+        "https://www.gettyimages.com/a",
+        "https://depositphotos.com/b",
+    ],
+)
+def test_watermarked_stock_libraries_are_skipped(host: str) -> None:
+    """Their previews match the query and are visually useless."""
+    assert parse_image_results(images(image(link=host)), limit=6) == []
+
+
+def test_a_stock_library_named_only_in_the_source_is_still_skipped() -> None:
+    parsed = parse_image_results(
+        images(image(link="https://aggregator.test/x", source="Alamy Stock Photo")), limit=6
+    )
+    assert parsed == []
+
+
+def test_tiny_images_are_skipped() -> None:
+    """Below 200px these are icons and avatars, not pictures of the subject."""
+    assert parse_image_results(
+        images(image(original_width=64, original_height=64)), limit=6
+    ) == []
+
+
+def test_an_unreported_size_is_not_treated_as_tiny() -> None:
+    parsed = parse_image_results(
+        images(image(original_width=None, original_height=None)), limit=6
+    )
+    assert len(parsed) == 1
+
+
+def test_ranks_stay_contiguous_after_filtering() -> None:
+    """Otherwise the numbering has gaps where a stock photo used to be."""
+    parsed = parse_image_results(
+        images(
+            image(link="https://www.shutterstock.com/a"),
+            image(link="https://good.test/1"),
+            image(original_width=10, original_height=10),
+            image(link="https://good.test/2"),
+        ),
+        limit=6,
+    )
+    assert [r.rank for r in parsed] == [1, 2]
+
+
+def test_results_without_any_usable_url_are_skipped() -> None:
+    assert parse_image_results(images({"title": "nothing"}), limit=6) == []
+
+
+def test_the_image_limit_is_respected() -> None:
+    many = images(*[image(link=f"https://good.test/{i}") for i in range(20)])
+    assert len(parse_image_results(many, limit=4)) == 4
+
+
+# --- html entities ------------------------------------------------------
+
+
+def test_search_snippets_decode_html_entities() -> None:
+    """They arrive as HTML fragments and are rendered as text, so nothing
+    downstream would decode them."""
+    parsed = parse_results(
+        serp(
+            {
+                "title": "A &amp; B",
+                "link": "https://x.test",
+                "snippet": "Kuala Lumpur&#39;s skyline&nbsp;today",
+            }
+        ),
+        limit=5,
+    )
+    assert parsed[0].title == "A & B"
+    assert "&nbsp;" not in parsed[0].snippet
+    assert "&#39;" not in parsed[0].snippet
+
+
+def test_news_titles_and_summaries_decode_html_entities() -> None:
+    items = parse_feed(
+        feed(
+            {
+                "title": "Anwar &amp; the budget",
+                "link": "https://y.test",
+                "summary": "<p>a&nbsp;b</p>",
+            }
+        ),
+        max_items=6,
+    )
+    assert items[0].title == "Anwar & the budget"
+    assert items[0].snippet == "a b"

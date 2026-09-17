@@ -144,6 +144,14 @@ class ToolResult:
     url: str
     snippet: str
     rank: int = 0
+    # Set only by image search. `url` stays the page the image came from, so a
+    # citation is always something a person can open and check.
+    thumbnail_url: str = ""
+    image_url: str = ""
+
+    @property
+    def is_image(self) -> bool:
+        return bool(self.thumbnail_url or self.image_url)
 
 
 @dataclass(frozen=True, slots=True)

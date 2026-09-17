@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from html import unescape
 
 import anyio
 from mcp import ClientSession, StdioServerParameters
@@ -134,7 +135,7 @@ def parse_feed(raw: str, *, max_items: int) -> list[NewsItem]:
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        title = str(entry.get("title") or "").strip()
+        title = _clean(str(entry.get("title") or ""))
         url = str(entry.get("link") or entry.get("url") or "").strip()
         if not title or not url:
             continue
@@ -233,4 +234,6 @@ def _clean(text: str) -> str:
             depth = max(0, depth - 1)
         elif depth == 0:
             out.append(char)
-    return " ".join("".join(out).split())
+    # Entities too: stripping tags leaves "&nbsp;" and "&amp;" as visible text,
+    # and these render as text rather than HTML downstream.
+    return " ".join(unescape("".join(out)).split())

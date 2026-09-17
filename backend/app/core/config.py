@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     serpapi_key: str = ""
     serpapi_base_url: str = "https://serpapi.com/search"
     search_max_results: int = 5
+    image_max_results: int = 6
 
     mcp_news_command: str = "/opt/mcp-news/bin/google-news-mcp"
     mcp_news_args: str = ""

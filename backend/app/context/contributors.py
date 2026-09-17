@@ -85,6 +85,26 @@ class ToolResultsContributor(ContextContributor):
         if not ctx.tool_results:
             return []
 
+        images = [r for r in ctx.tool_results if r.is_image]
+        documents = [r for r in ctx.tool_results if not r.is_image]
+
+        messages: list[ChatMessage] = []
+        if images:
+            # Without this the model says "I cannot show you photos", which is
+            # false and directly contradicts the grid rendered above its answer.
+            titles = "; ".join(r.title for r in images[:4])
+            messages.append(
+                system(
+                    f"{len(images)} matching images are already displayed to the user "
+                    f"above your reply ({titles}). Do not say you cannot show images "
+                    "and do not list their URLs. Describe or discuss the subject, and "
+                    "add anything useful the pictures do not convey."
+                )
+            )
+
+        if not documents:
+            return messages
+
         lines: list[str] = [
             "Search results are given below. Use them to answer, and cite the "
             "ones you rely on inline as [1], [2] and so on. If they do not "
@@ -93,7 +113,7 @@ class ToolResultsContributor(ContextContributor):
         ]
         used = count_tokens("\n".join(lines), ctx.model)
 
-        for result in ctx.tool_results:
+        for result in documents:
             block = f"[{result.rank}] {result.title}\n{result.url}\n{result.snippet}".strip()
             cost = count_tokens(block, ctx.model)
             if used + cost > ctx.budget.tools:
@@ -101,7 +121,8 @@ class ToolResultsContributor(ContextContributor):
             lines.extend([block, ""])
             used += cost
 
-        return [system("\n".join(lines).strip())]
+        messages.append(system("\n".join(lines).strip()))
+        return messages
 
 
 class HistoryContributor(ContextContributor):

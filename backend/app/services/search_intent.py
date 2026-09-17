@@ -27,6 +27,8 @@ class SearchDecision:
     reason: str
     # True when a model call was needed, so the cost is attributable.
     used_model: bool = False
+    # True when the user asked to be shown something, not told about it.
+    wants_images: bool = False
 
 
 # --- stage one: patterns ------------------------------------------------
@@ -68,6 +70,21 @@ NEVER_NEEDS_CURRENT = re.compile(
 # the world.
 CODE_BLOCK = re.compile(r"```")
 
+# "Show me X" is a different request from "tell me about X". Detected by pattern
+# alone: the phrasings are few and explicit, and a model call to recognise
+# "picture of" would be spending money to read English.
+WANTS_IMAGES = re.compile(
+    r"\b("
+    r"(?:show|find|get|give|send)\s+(?:me\s+)?(?:some\s+|a\s+|an\s+|the\s+)?"
+    r"(?:picture|pictures|photo|photos|image|images|pic|pics|screenshot|screenshots)\b"
+    r"|(?:picture|photo|image|pics?|photos|images)\s+of\b"
+    r"|what\s+(?:does|do|did)\s+.{1,60}?\s+look\s+like"
+    r"|how\s+does\s+.{1,60}?\s+look\b"
+    r"|\b(?:diagram|illustration|poster|artwork|logo)\s+of\b"
+    r")",
+    re.IGNORECASE,
+)
+
 CLASSIFIER_PROMPT = """\
 Decide whether answering the user's message requires looking up current \
 information on the web.
@@ -97,6 +114,14 @@ async def decide(
     text = message.strip()
     if not text:
         return SearchDecision(False, "empty message")
+
+    # Checked before the negative patterns: "show me a picture of a moka pot"
+    # contains no creative-task words, but "draw me a picture" would, and the
+    # image intent is the more specific reading either way.
+    if match := WANTS_IMAGES.search(text):
+        return SearchDecision(
+            True, f"asked to see {match.group(0).lower()!r}", wants_images=True
+        )
 
     if CODE_BLOCK.search(text):
         return SearchDecision(False, "contains a code block")
