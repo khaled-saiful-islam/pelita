@@ -145,7 +145,7 @@ function MessageRow({
           <MessageUsage
             message={message}
             currency={currency}
-            className="opacity-0 transition-opacity group-hover/message:opacity-100"
+            className="reveal-on-hover opacity-0 transition-opacity group-hover/message:opacity-100"
           />
         </div>
       )}

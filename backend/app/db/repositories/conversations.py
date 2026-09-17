@@ -24,6 +24,7 @@ class ConversationRepository(Protocol):
     async def get_message(self, message_id: UUID) -> Message | None: ...
     async def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]: ...
     async def touch(self, conversation: Conversation) -> None: ...
+    async def recent_user_messages(self, user_id: UUID, *, limit: int) -> list[str]: ...
 
 
 class SqlConversationRepository(ConversationRepository):
@@ -95,3 +96,18 @@ class SqlConversationRepository(ConversationRepository):
         """Bump updated_at so the sidebar reorders."""
         conversation.updated_at = func.now()
         await self._session.flush()
+
+    async def recent_user_messages(self, user_id: UUID, *, limit: int) -> list[str]:
+        """This user's latest questions, newest first, across conversations.
+
+        What someone has been asking about is a better signal of what they want
+        to read than a standing profile fact — it moves with them.
+        """
+        result = await self._session.execute(
+            select(Message.content)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(Conversation.user_id == user_id, Message.role == "user")
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        return [content for content in result.scalars().all() if content.strip()]

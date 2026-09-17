@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Check, LogOut, MoreHorizontal, PenSquare, Settings, Trash2, User, X } from 'lucide-react'
+import { useEffect } from 'react'
 import { Button, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
@@ -38,6 +39,8 @@ export function Sidebar({
   conversations,
   activeId,
   loading,
+  open,
+  onClose,
   onSelect,
   onNew,
   onRename,
@@ -46,6 +49,9 @@ export function Sidebar({
   conversations: ConversationSummary[]
   activeId: string | null
   loading: boolean
+  /** Drawer state. Ignored from `md` up, where the sidebar is always present. */
+  open: boolean
+  onClose: () => void
   onSelect: (id: string) => void
   onNew: () => void
   onRename: (id: string, title: string) => void
@@ -54,9 +60,38 @@ export function Sidebar({
   const { user, signOut } = useAuth()
   const groups = groupByRecency(conversations)
 
+  // Escape closes the drawer. Expected of anything that covers the page, and
+  // the only way out for someone not using a pointer.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
   return (
-    <aside className="flex h-dvh w-[var(--sidebar-width)] shrink-0 flex-col border-r border-border bg-sidebar">
-      <div className="p-3">
+    <>
+      {/* Scrim, mobile only. */}
+      <div
+        onClick={onClose}
+        aria-hidden
+        className={cn(
+          'fixed inset-0 z-30 bg-foreground/20 backdrop-blur-[2px] transition-opacity md:hidden',
+          open ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+      />
+
+      <aside
+        className={cn(
+          'flex h-dvh w-[var(--sidebar-width)] shrink-0 flex-col border-r border-border bg-sidebar',
+          // Off-canvas below md, static from md up.
+          'fixed inset-y-0 left-0 z-40 transition-transform md:static md:translate-x-0',
+          open ? 'translate-x-0 shadow-lg' : '-translate-x-full',
+        )}
+      >
+      <div className="flex items-center gap-1 p-3">
         <button
           type="button"
           onClick={onNew}
@@ -68,6 +103,16 @@ export function Sidebar({
           <PenSquare className="size-4" aria-hidden />
           New chat
         </button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label="Close menu"
+          className="md:hidden"
+        >
+          <X className="size-4" aria-hidden />
+        </Button>
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversation history">
@@ -120,7 +165,8 @@ export function Sidebar({
           </Button>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
 
@@ -195,7 +241,7 @@ function ConversationRow({
         aria-label={`Actions for ${conversation.title}`}
         aria-expanded={menuOpen}
         className={cn(
-          'absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity',
+          'reveal-on-hover absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity',
           'opacity-0 focus-visible:opacity-100 group-hover/row:opacity-100',
           menuOpen && 'opacity-100',
         )}

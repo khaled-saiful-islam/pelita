@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.deps import CurrentUser, SessionDep, SettingsDep
+from app.providers.registry import build_provider
 from app.services.news_service import NewsService
 from app.tools.news_mcp import NewsMcpConfig
 
@@ -31,11 +32,18 @@ async def headlines(
         timeout=settings.mcp_news_timeout_seconds,
         max_items=settings.mcp_news_max_items,
     )
-    items, from_cache = await NewsService(
+    items, from_cache, query = await NewsService(
         session, config, settings.mcp_news_ttl_seconds
-    ).headlines()
+    ).personalised(
+        user_id=user.id,
+        provider=build_provider(settings),
+        max_per_user=settings.memory_max_per_user,
+    )
 
     return {
         "items": [item.as_dict() for item in items],
         "cached": from_cache,
+        # Empty when the general front page was used. The UI shows it so a
+        # personalised strip does not look like a random selection.
+        "topic": query,
     }

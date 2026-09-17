@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 import anyio
 from mcp import ClientSession, StdioServerParameters
@@ -60,6 +62,23 @@ class NewsMcpConfig:
     country: str
     timeout: float
     max_items: int
+    # When set, headlines are searched for this instead of taken from the
+    # general front page. Used to follow what the user actually talks about.
+    query: str = ""
+
+    @property
+    def effective_tool(self) -> str:
+        return self.search_tool if self.query else self.tool
+
+    # The server exposes both; which one to call depends on whether we have a
+    # topic worth searching for.
+    search_tool: str = "get_search_feed"
+
+    def tool_arguments(self) -> dict[str, str]:
+        arguments = {"language": self.language, "country": self.country}
+        if self.query:
+            arguments["query"] = self.query
+        return arguments
 
 
 async def fetch_headlines(config: NewsMcpConfig) -> list[NewsItem]:
@@ -74,8 +93,7 @@ async def fetch_headlines(config: NewsMcpConfig) -> list[NewsItem]:
             ):
                 await session.initialize()
                 result = await session.call_tool(
-                    config.tool,
-                    {"language": config.language, "country": config.country},
+                    config.effective_tool, config.tool_arguments()
                 )
     except TimeoutError as exc:
         raise NewsUnavailable(f"MCP server timed out after {config.timeout}s") from exc
@@ -132,12 +150,35 @@ def parse_feed(raw: str, *, max_items: int) -> list[NewsItem]:
                 )[:SNIPPET_MAX_LENGTH],
             )
         )
-        if len(items) >= max_items:
+        if len(items) >= max_items * 2:
+            # Over-fetch so the recency sort below has something to choose from.
             break
 
     if not items:
         raise NewsUnavailable("MCP server returned no usable headlines")
-    return items
+
+    # The search feed ranks by relevance, which puts month-old articles under a
+    # heading that says "In the news". Freshest first is what the label promises.
+    items.sort(key=_published_sort_key, reverse=True)
+    return items[:max_items]
+
+
+def _published_sort_key(item: NewsItem) -> float:
+    """Epoch seconds, or 0 when the date is missing or unparseable.
+
+    Undated items sort last rather than being dropped — a headline with no
+    timestamp is still a headline.
+    """
+    if not item.published_at:
+        return 0.0
+    try:
+        return parsedate_to_datetime(item.published_at).timestamp()
+    except (TypeError, ValueError):
+        pass
+    try:
+        return datetime.fromisoformat(item.published_at.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
 
 
 def _entries_from(payload: object) -> list:

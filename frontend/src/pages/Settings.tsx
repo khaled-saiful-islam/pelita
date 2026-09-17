@@ -237,7 +237,7 @@ function MemoryRow({
       </div>
 
       {!editing && (
-        <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/memory:opacity-100 focus-within:opacity-100">
+        <div className="reveal-on-hover flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover/memory:opacity-100 focus-within:opacity-100">
           <Button
             variant="ghost"
             size="icon"

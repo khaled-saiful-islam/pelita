@@ -63,6 +63,25 @@
     animation: pelita-caret 1.1s steps(1, end) infinite;
   }
 
+  /* Reveal-on-hover controls, made permanent where there is no hover.
+     A touch device never fires hover, so message actions and the usage line
+     would simply be unreachable on a phone. */
+  @media (hover: none) {
+    .reveal-on-hover {
+      opacity: 1 !important;
+    }
+  }
+
+  /* Scrollable without a visible bar, for the news carousel — the arrows are
+     the affordance there, and a scrollbar under the cards looks unfinished. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   /* The shimmer used on status text while the model is working. A moving
      highlight reads as "in progress" without the jitter of bouncing dots. */
   @keyframes pelita-shimmer {

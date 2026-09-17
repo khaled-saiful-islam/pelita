@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Download } from 'lucide-react'
+import { Download, Menu } from 'lucide-react'
 import { Alert, Button } from '@/components/ui'
 import { Logo } from '@/components/Logo'
 import { Composer } from '@/components/chat/Composer'
@@ -19,6 +19,7 @@ export default function Chat() {
   const list = useConversations()
   const config = useConfig()
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   const onConversationStarted = useCallback(
     (id: string, title: string) => {
@@ -45,6 +46,7 @@ export default function Chat() {
   function startNew() {
     reset()
     navigate('/')
+    setMenuOpen(false)
   }
 
   async function remove(id: string) {
@@ -61,16 +63,32 @@ export default function Chat() {
         conversations={list.conversations}
         activeId={activeId}
         loading={list.loading}
-        onSelect={(id) => navigate(`/c/${id}`)}
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onSelect={(id) => {
+          navigate(`/c/${id}`)
+          setMenuOpen(false)
+        }}
         onNew={startNew}
         onRename={list.rename}
         onDelete={remove}
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
+        {empty && (
+          // The empty screen has no header of its own, so the drawer needs its
+          // own way in on mobile.
+          <div className="flex h-12 shrink-0 items-center px-2 md:hidden">
+            <MenuButton onClick={() => setMenuOpen(true)} />
+          </div>
+        )}
+
         {!empty && (
-          <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-4">
-            <h1 className="truncate text-sm font-medium">{chat.title}</h1>
+          <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-2 sm:gap-4 sm:px-4">
+            <div className="flex min-w-0 items-center gap-1">
+              <MenuButton onClick={() => setMenuOpen(true)} className="md:hidden" />
+              <h1 className="truncate text-sm font-medium">{chat.title}</h1>
+            </div>
             <div className="flex shrink-0 items-center gap-3">
               {chat.totals && <ConversationUsage totals={chat.totals} />}
             {activeId && (
@@ -84,7 +102,7 @@ export default function Chat() {
               >
                 <Button variant="ghost" size="sm">
                   <Download className="size-4" aria-hidden />
-                  Export
+                  <span className="hidden sm:inline">Export</span>
                 </Button>
               </a>
             )}
@@ -128,6 +146,20 @@ export default function Chat() {
         />
       </main>
     </div>
+  )
+}
+
+function MenuButton({ onClick, className }: { onClick: () => void; className?: string }) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onClick}
+      aria-label="Open menu"
+      className={className}
+    >
+      <Menu className="size-4" aria-hidden />
+    </Button>
   )
 }
 

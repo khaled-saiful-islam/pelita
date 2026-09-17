@@ -49,7 +49,7 @@ export function MessageActions({
     <div className="mt-2">
       <div
         className={cn(
-          'flex items-center gap-0.5 transition-opacity',
+          'reveal-on-hover flex items-center gap-0.5 transition-opacity',
           'opacity-0 group-hover/message:opacity-100 focus-within:opacity-100',
           (rating || copied) && 'opacity-100',
         )}

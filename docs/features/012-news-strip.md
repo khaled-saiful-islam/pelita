@@ -2,11 +2,44 @@
 
 ## What it does
 
-Headlines above the composer on the new-chat screen, as clickable cards that
-open in a new tab. Pulled from an MCP server, cached in Postgres for 30 minutes.
-If anything fails, the strip is hidden and chat is untouched.
+Headlines above the composer on the new-chat screen, chosen from what you have
+been asking about. Cards open in a new tab; arrows scroll the row. Pulled from
+an MCP server, cached in Postgres for 30 minutes. If anything fails, the strip
+is hidden and chat is untouched.
 
 ## How it works
+
+### The topic follows the conversation
+
+What someone has been asking about is a better signal of what they want to read
+than a standing profile fact, because it moves with them. So the query is
+derived from their recent questions first, with memory used only to
+disambiguate or add a location.
+
+| signal available | result |
+|---|---|
+| Fewer than two signals | General front page. No model call |
+| Recent questions | `get_search_feed` with the derived query |
+| Questions and memories | Same, with memory as secondary context |
+| Model answers `NONE` | General front page |
+
+A new account sees general news rather than a guess from one message, and
+generic chit-chat, coding help or creative writing produce `NONE` rather than a
+confidently irrelevant strip.
+
+The derived query is cached per user on the same clock as the headlines, so the
+new-chat screen does not cost a model call every time it loads. The topic moves
+as the conversation does, but not on every page view.
+
+The topic is shown as a badge next to "In the news". Personalisation that cannot
+explain itself looks like a random selection.
+
+### Freshest first
+
+The search feed ranks by relevance, which puts month-old articles under a
+heading that says "In the news". Items are over-fetched, sorted by publication
+date and then trimmed. Undated items sort last rather than being dropped — a
+headline with no timestamp is still a headline.
 
 ### A real MCP client
 
@@ -70,12 +103,15 @@ card shows the publisher separately and strips the suffix from the headline.
 |---|---|---|
 | `MCP_NEWS_COMMAND` | `/opt/mcp-news/bin/google-news-mcp` | Executable to spawn |
 | `MCP_NEWS_ARGS` | *(empty)* | Extra arguments, space separated |
-| `MCP_NEWS_TOOL` | `get_top_headlines` | Tool name to call |
+| `MCP_NEWS_TOOL` | `get_top_headlines` | Tool called when there is no topic |
 | `MCP_NEWS_LANGUAGE` | `en` | Passed to the tool |
 | `MCP_NEWS_COUNTRY` | `US` | Passed to the tool. `MY` for Malaysia |
 | `MCP_NEWS_TTL_SECONDS` | `1800` | Cache lifetime |
 | `MCP_NEWS_TIMEOUT_SECONDS` | `20` | Give-up time for the whole exchange |
 | `MCP_NEWS_MAX_ITEMS` | `6` | Cards rendered |
+
+The search tool (`get_search_feed`) is used automatically whenever a topic was
+derived; only the headline tool is configurable, since that is the fallback.
 
 ## How to extend it
 
@@ -90,8 +126,13 @@ card shows the publisher separately and strips the suffix from the headline.
 
 - **A subprocess per cache miss.** Spawning a Python interpreter every 30
   minutes is fine; a much shorter TTL would not be.
-- **Cache is global, not per user.** Everyone sees the same headlines for the
-  configured language and country.
+- **The cache is shared by topic, not by user.** Two people whose questions
+  produce the same query share an entry, which is the intent — but it means the
+  strip is only as private as the query, and the query is derived from what you
+  asked.
+- **One model call per topic refresh**, at most once per TTL per user.
+- **Topic quality follows the model.** A weak one produces a vague query and a
+  vague strip; `NONE` is the safety valve and general news the floor.
 - **No pagination or categories.** One tool call, one list.
 - **`MCP_NEWS_ARGS` splits on whitespace**, so arguments containing spaces are
   not supported.
@@ -105,8 +146,16 @@ suffix, an explicit source winning, the fallback when neither exists, HTML
 stripped from summaries, `max_items`, three alternative payload shapes, non-JSON
 reported as unavailable, and no usable entries reported as unavailable.
 
+`backend/tests/test_news_topics.py` — 22 tests: plain queries accepted, prose
+and markup rejected, a new account getting the front page with no model call, a
+single signal being insufficient, recent questions alone being enough, the model
+declining with `NONE`, questions labelled as the stronger signal in the prompt,
+bounded question count and length, blank questions not counting, and a failing
+model falling back.
+
 ## Verified
 
-Live against Google News: six real Malaysian headlines from Malaysiakini, The
-Star and Borneo Post, rendered as cards with publisher badges. Second request
-served from cache in 24ms.
+Live against Google News. A new account with no history received the general
+front page (`topic: ""`). After two questions about espresso, the same account
+received `topic: "espresso coffee beans roasting"` and coffee-roasting
+headlines. A second request was served from cache in 24ms.
