@@ -6,6 +6,9 @@ Attach a text, PDF or Word file to a chat and ask questions about it. Up to
 three files per conversation, 5 MB each, and every attached file stays available
 for the whole conversation — so a question can span all three.
 
+Images go through this same path and share these same limits once a vision model
+is configured — see [019](019-image-understanding.md).
+
 ```
 You:  What's the deadline in the brief, and does the contract allow it?
 Bot:  The deadline is 14 November 2026, according to project-brief.txt.

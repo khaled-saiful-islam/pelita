@@ -43,6 +43,11 @@ class Document(Base):
     unit: Mapped[str] = mapped_column(String(16), nullable=False, default="line")
     unit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # A small JPEG data URI, for images only. Kept because a card showing a
+    # filename and no picture is a poor answer to "did my photo upload?" — and
+    # because the original bytes are not stored, so there is nothing else to
+    # show. Bounded at upload; null for every other kind of file.
+    thumbnail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = created_at()
 

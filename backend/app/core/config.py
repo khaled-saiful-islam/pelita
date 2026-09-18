@@ -87,6 +87,35 @@ class Settings(BaseSettings):
     document_max_bytes: int = 5 * 1024 * 1024
     document_max_per_conversation: int = 3
 
+    # ---- Vision ----------------------------------------------------------
+    # Reading an uploaded image needs a model that can see, which is rarely the
+    # same one that writes the answers. Empty `vision_model` turns the feature
+    # off and images are refused, so the template still runs on one provider.
+    #
+    # The URL and key fall back to the chat provider's, because the common case
+    # is one gateway serving both.
+    vision_model: str = ""
+    vision_base_url: str = ""
+    vision_api_key: str = ""
+    vision_timeout_seconds: float = 90.0
+    vision_max_tokens: int = 4096
+    # Downscaled before sending: a phone photo is 12MP, and a vision model
+    # charges for tiles it gains nothing from.
+    vision_max_pixels: int = 2_500_000
+    vision_jpeg_quality: int = 82
+
+    @property
+    def vision_enabled(self) -> bool:
+        return bool(self.vision_model.strip())
+
+    @property
+    def resolved_vision_base_url(self) -> str:
+        return (self.vision_base_url or self.llm_base_url).rstrip("/")
+
+    @property
+    def resolved_vision_api_key(self) -> str:
+        return self.vision_api_key or self.llm_api_key
+
     # ---- Memory ---------------------------------------------------------
     memory_auto_extract: bool = True
     memory_max_per_user: int = 100

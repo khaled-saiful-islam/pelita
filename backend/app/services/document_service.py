@@ -19,11 +19,15 @@ from app.core.tokens import count_tokens
 from app.db.models.document import Document
 from app.db.repositories.conversations import SqlConversationRepository
 from app.services.document_extract import (
-    SUPPORTED_DESCRIPTION,
+    ExtractedText,
     UnreadableDocument,
     UnsupportedDocument,
+    classify,
     extract,
+    supported_description,
 )
+from app.services.image_prep import UnreadableImage, prepare, thumbnail
+from app.vision.base import ImageReader, VisionError
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +50,19 @@ class DocumentService:
         max_bytes: int,
         max_per_conversation: int,
         model: str = "gpt-4o-mini",
+        reader: ImageReader | None = None,
+        image_max_pixels: int = 2_500_000,
+        image_jpeg_quality: int = 82,
     ) -> None:
         self._session = session
         self._max_bytes = max_bytes
         self._max_files = max_per_conversation
         self._model = model
+        # None means no vision model is configured, which is what makes an
+        # image an unsupported file type rather than a broken one.
+        self._reader = reader
+        self._image_max_pixels = image_max_pixels
+        self._image_jpeg_quality = image_jpeg_quality
 
     async def assert_access(self, user_id: UUID, conversation_id: UUID) -> None:
         """Raise unless this user owns the conversation.
@@ -113,7 +125,13 @@ class DocumentService:
             )
 
         try:
-            extracted = extract(data, filename=filename, media_type=media_type)
+            kind = classify(
+                filename=filename, media_type=media_type, images=self._reader is not None
+            )
+            if kind == "image":
+                extracted, preview = await self._read_image(data, filename)
+            else:
+                extracted, preview = extract(data, filename=filename, media_type=media_type), None
         except UnsupportedDocument as exc:
             raise ValidationError(str(exc)) from exc
         except UnreadableDocument as exc:
@@ -121,7 +139,8 @@ class DocumentService:
 
         if not extracted.text.strip():
             raise ValidationError(
-                f"No readable text found in {filename}. Upload {SUPPORTED_DESCRIPTION}."
+                f"No readable text found in {filename}. "
+                f"Upload {supported_description(images=self._reader is not None)}."
             )
 
         document = Document(
@@ -133,6 +152,7 @@ class DocumentService:
             unit=extracted.unit,
             unit_count=extracted.count,
             token_count=count_tokens(extracted.text, self._model),
+            thumbnail=preview,
         )
         self._session.add(document)
         await self._session.flush()
@@ -144,6 +164,47 @@ class DocumentService:
             conversation_id,
         )
         return document
+
+    async def _read_image(self, data: bytes, filename: str) -> tuple[ExtractedText, str | None]:
+        """Transcribe an image, and build the thumbnail for its card.
+
+        Read once, here, rather than on every turn: the text is what the rest of
+        the pipeline already understands, so an image that has been read costs
+        no more than a text file. The trade is that the transcript is fixed at
+        upload — which is why the prompt transcribes everything rather than
+        answering a question that has not been asked yet.
+        """
+        if self._reader is None:  # pragma: no cover - classify() already refused
+            raise UnsupportedDocument(f"{filename} is an image, and images are not enabled.")
+
+        try:
+            pixels, media_type = prepare(
+                data,
+                max_pixels=self._image_max_pixels,
+                jpeg_quality=self._image_jpeg_quality,
+            )
+        except UnreadableImage as exc:
+            raise UnreadableDocument(str(exc)) from exc
+
+        try:
+            text = await self._reader.read(pixels, media_type=media_type)
+        except VisionError as exc:
+            # The reason is the user's — a rate limit and a bad key need
+            # different actions, and "could not read it" says neither.
+            raise UnreadableDocument(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - an unexpected shape is still a refusal
+            logger.exception("vision call failed for %s", filename)
+            raise UnreadableDocument(f"{filename} could not be read.") from exc
+
+        if not text.strip():
+            raise UnreadableDocument(
+                f"Nothing readable was found in {filename}."
+            )
+
+        # A thumbnail is built from the original bytes, not the downscaled ones:
+        # the vision copy is sized for a model, and cropping quality for the
+        # model would show in the card.
+        return ExtractedText(text=text, unit="image", count=1), thumbnail(data)
 
     async def delete(self, *, user_id: UUID, conversation_id: UUID, document_id: UUID) -> None:
         await self._assert_owns(user_id, conversation_id)

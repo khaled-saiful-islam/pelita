@@ -58,6 +58,8 @@ export interface PublicConfig {
   app_name: string
   model: string
   search_enabled: boolean
+  /** Whether a vision model is configured, so images may be uploaded. */
+  images_enabled: boolean
   currency: string
   supported_languages: string[]
 }

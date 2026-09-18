@@ -36,8 +36,17 @@ DOCX_TYPES = frozenset(
 TEXT_SUFFIXES = (".txt", ".md", ".markdown", ".csv", ".json", ".xml", ".log", ".rst")
 PDF_SUFFIXES = (".pdf",)
 DOCX_SUFFIXES = (".docx",)
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif")
 
 SUPPORTED_DESCRIPTION = "plain text, Markdown, CSV, JSON, PDF or Word (.docx)"
+SUPPORTED_WITH_IMAGES = f"{SUPPORTED_DESCRIPTION}, or an image"
+
+
+def supported_description(*, images: bool) -> str:
+    """What to tell someone they may upload. Depends on whether a vision model
+    is configured, because promising images without one is worse than refusing
+    them."""
+    return SUPPORTED_WITH_IMAGES if images else SUPPORTED_DESCRIPTION
 
 
 class UnsupportedDocument(ValueError):
@@ -58,7 +67,12 @@ class ExtractedText:
 
 
 def extract(data: bytes, *, filename: str, media_type: str) -> ExtractedText:
-    """Read a file into text, or say why it could not be read."""
+    """Read a file into text, or say why it could not be read.
+
+    Images are not handled here: reading one is a network call, and this stays
+    a pure function so it can be tested without one. `DocumentService` routes
+    them to the image reader.
+    """
     kind = classify(filename=filename, media_type=media_type)
     if kind == "pdf":
         return _from_pdf(data)
@@ -67,21 +81,33 @@ def extract(data: bytes, *, filename: str, media_type: str) -> ExtractedText:
     return _from_text(data)
 
 
-def classify(*, filename: str, media_type: str) -> str:
-    """Return 'text', 'pdf' or 'docx'.
+def classify(*, filename: str, media_type: str, images: bool = False) -> str:
+    """Return 'text', 'pdf', 'docx' or 'image'.
 
     Extension first: browsers send `application/octet-stream` for .md and
     sometimes for .docx, so the name is the more reliable signal.
+
+    `images` says whether a vision model is configured. Without one an image is
+    refused here rather than accepted and stored unreadable — a file that
+    uploads cleanly and then cannot be asked about is the worse failure.
     """
     lowered = filename.lower()
+    base = media_type.split(";")[0].strip().lower()
+
     if lowered.endswith(PDF_SUFFIXES):
         return "pdf"
     if lowered.endswith(DOCX_SUFFIXES):
         return "docx"
+    if lowered.endswith(IMAGE_SUFFIXES) or base.startswith("image/"):
+        if not images:
+            raise UnsupportedDocument(
+                f"{filename} is an image, and no vision model is configured. "
+                f"Upload {SUPPORTED_DESCRIPTION}."
+            )
+        return "image"
     if lowered.endswith(TEXT_SUFFIXES):
         return "text"
 
-    base = media_type.split(";")[0].strip().lower()
     if base in PDF_TYPES:
         return "pdf"
     if base in DOCX_TYPES:
@@ -90,7 +116,8 @@ def classify(*, filename: str, media_type: str) -> str:
         return "text"
 
     raise UnsupportedDocument(
-        f"{filename} is not a supported file type. Upload {SUPPORTED_DESCRIPTION}."
+        f"{filename} is not a supported file type. "
+        f"Upload {supported_description(images=images)}."
     )
 
 

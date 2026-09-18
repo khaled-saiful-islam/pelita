@@ -20,6 +20,8 @@ class DocumentResponse(BaseModel):
     unit: str
     unit_count: int
     token_count: int
+    # Set for images only — a data URI the card renders.
+    thumbnail: str | None = None
     created_at: datetime
 
 

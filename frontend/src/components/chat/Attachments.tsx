@@ -3,6 +3,16 @@ import { cn } from '@/lib/utils'
 import { formatBytes, type AttachedFile } from '@/hooks/useDocuments'
 
 /**
+ * "27 lines", "3 pages" — or nothing for an image, where "1 image" says less
+ * than the picture next to it already does.
+ */
+function extent(file: AttachedFile): string {
+  if (file.unit === 'image') return formatBytes(file.size_bytes)
+  const plural = file.unit_count === 1 ? '' : 's'
+  return `${file.unit_count} ${file.unit}${plural}`
+}
+
+/**
  * Attached files, in the two places they appear.
  *
  * `Attachments` is the composer: files you have picked but not yet sent, each
@@ -43,16 +53,20 @@ function Chip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) 
         'group/file inline-flex max-w-[15rem] items-center gap-1.5 rounded-lg',
         'border border-border bg-surface-raised py-1 pl-2 pr-1 text-xs',
       )}
-      title={`${file.filename} · ${file.unit_count} ${file.unit}${
-        file.unit_count === 1 ? '' : 's'
-      } · ${formatBytes(file.size_bytes)}`}
+      title={`${file.filename} · ${extent(file)}`}
     >
-      <FileText className="size-3.5 shrink-0 text-primary" aria-hidden />
+      {file.thumbnail ? (
+        <img
+          src={file.thumbnail}
+          alt=""
+          className="size-4 shrink-0 rounded object-cover"
+          aria-hidden
+        />
+      ) : (
+        <FileText className="size-3.5 shrink-0 text-primary" aria-hidden />
+      )}
       <span className="truncate font-medium">{file.filename}</span>
-      <span className="shrink-0 text-muted-foreground">
-        {file.unit_count} {file.unit}
-        {file.unit_count === 1 ? '' : 's'}
-      </span>
+      <span className="shrink-0 text-muted-foreground">{extent(file)}</span>
       <button
         type="button"
         onClick={onRemove}
@@ -103,16 +117,26 @@ function Card({ file }: { file: AttachedFile }) {
         'bg-surface-raised px-3 py-2 text-left',
       )}
     >
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10">
-        <FileText className="size-4 text-primary" aria-hidden />
-      </span>
+      {file.thumbnail ? (
+        // The original is not stored, so this is the only picture there is —
+        // and a card for a photo that shows a document icon reads as a failed
+        // upload.
+        <img
+          src={file.thumbnail}
+          alt={file.filename}
+          className="size-8 shrink-0 rounded-lg object-cover"
+        />
+      ) : (
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10">
+          <FileText className="size-4 text-primary" aria-hidden />
+        </span>
+      )}
       <span className="min-w-0">
         <span className="block truncate text-[0.8125rem] font-medium leading-tight">
           {file.filename}
         </span>
         <span className="block truncate text-xs text-muted-foreground">
-          {file.unit_count} {file.unit}
-          {file.unit_count === 1 ? '' : 's'} · {formatBytes(file.size_bytes)}
+          {file.unit === 'image' ? extent(file) : `${extent(file)} · ${formatBytes(file.size_bytes)}`}
         </span>
       </span>
     </div>

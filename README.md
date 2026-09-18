@@ -47,6 +47,7 @@ default.
 | **Streaming chat** | Token-by-token over SSE, with a stop button that cancels on the server and keeps the partial answer |
 | **Web search** | Optional per message. Shows "Searching the web…" while it runs and lists numbered sources under the answer |
 | **Attached files** | Text, PDF and Word files — three per chat, 5 MB each. Each appears as a card on the message that sent it, and stays readable for the rest of the chat |
+| **Image understanding** | Attach a photo, screenshot or scan and ask about it. Needs a vision model; off until you set `VISION_MODEL` |
 | **News strip** | Headlines on the new-chat screen, pulled from an MCP server via the official Python SDK and cached for 30 minutes |
 | **Token and cost accounting** | Per message and per conversation, labelled as provider-reported or estimated so a total is never quietly a guess |
 | **Language auto-detection** | Replies in the language of your first message. Verified for Bahasa Melayu, English, Tamil, Chinese and Bengali |
@@ -81,6 +82,7 @@ is the only prerequisite.
 | `SERPAPI_KEY` | *(empty)* | Enables web search. The toggle stays disabled without it |
 | `LLM_PRICE_INPUT_PER_1M` / `_OUTPUT_PER_1M` | `0.15` / `0.60` | **Set to your provider's real rates**, or the cost column is fiction |
 | `DOCUMENT_MAX_BYTES` / `_MAX_PER_CONVERSATION` | `5 MB` / `3` | Attached-file limits. Raising the size means raising `client_max_body_size` in `frontend/nginx.conf` too |
+| `VISION_MODEL` | *(empty)* | Enables image upload. `gpt-4o-mini`, `llama-3.2-11b-vision-preview`, `llava`. Defaults to the `LLM_` URL and key |
 | `SUPPORTED_LANGUAGES` | `en,ms,ta,zh,bn` | Languages to detect between |
 | `MEMORY_AUTO_EXTRACT` | `true` | `false` removes one model call per turn |
 | `SUGGESTIONS_ENABLED` | `true` | `false` removes one model call per turn |
@@ -133,7 +135,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-508 backend tests and 38 frontend tests, 86% backend coverage. The
+544 backend tests and 38 frontend tests, 87% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.

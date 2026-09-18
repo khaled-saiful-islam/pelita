@@ -45,6 +45,7 @@ have designed it wrong — pass the values in.
 | Tools | `tools/base.py` | `tools/registry.py` |
 | Search backends | `tools/serpapi.py` | used by the tools above |
 | File readers | `services/document_extract.py` | `classify()` |
+| Vision backends | `vision/base.py` | `vision/registry.py` |
 
 Adding one is a new file plus one registry line. If your change requires editing
 three existing files, stop and ask whether the seam is in the wrong place.
@@ -98,7 +99,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 86% backend, across 508 backend and 38 frontend tests.
+Target 80%. Currently 87% backend, across 544 backend and 38 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -217,7 +218,12 @@ Be honest about these rather than discovering them:
 - **Attached files are re-sent every turn** and cost `DOCUMENTS_TOKEN_BUDGET`
   each time. No excerpt caching between turns.
 - **Extraction is synchronous.** A 5 MB PDF holds its request for a second or
-  two.
+  two, and an image upload holds it for the length of a vision call.
+- **Images inside documents are invisible.** Only a file that *is* an image
+  gets a vision call; a photo inside a PDF or docx is not extracted.
+- **Uploaded images are not safety-screened.** The hook belongs in
+  `_read_image()` between `prepare()` and `reader.read()`, so one check covers
+  every path to the model. Fine locally; not fine facing the public internet.
 
 ## Things that will look wrong but are deliberate
 
@@ -229,6 +235,12 @@ Be honest about these rather than discovering them:
 - **Uploads are stored as extracted text, not as bytes.** No object storage to
   configure, and a bad PDF fails once at upload rather than inside a chat turn.
   The cost is that the original cannot be shown back or re-parsed later.
+- **An uploaded image is read once, at upload, into text.** It then travels
+  the document path unchanged — same column, same budget, same contributor,
+  same card. The alternative is multimodal `ChatMessage.content`, which stops
+  being a `str` and pushes that shape into every contributor and the token
+  counter for one feature. The cost is that the transcript is fixed at upload,
+  which is why the prompt transcribes exhaustively rather than answering.
 - **`documents.message_id` is nullable, and that is the state model.** Null
   means "still in the composer", set means "a card in the transcript". A file is
   uploaded before there is a message to bind it to, so the gap is real rather

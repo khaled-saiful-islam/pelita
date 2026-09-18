@@ -3,7 +3,7 @@ import { useRef as useNodeRef } from 'react'
 import { ArrowUp, Check, Globe, Paperclip, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SearchMode } from '@/hooks/useChat'
-import { ACCEPT_ATTRIBUTE, type AttachedFile } from '@/hooks/useDocuments'
+import { acceptAttribute, type AttachedFile } from '@/hooks/useDocuments'
 import { Attachments } from './Attachments'
 
 const MAX_HEIGHT_PX = 224 // matches --composer-max-height in theme.css
@@ -32,6 +32,7 @@ export function Composer({
   streaming,
   disabled,
   searchEnabled,
+  imagesEnabled = false,
   files,
   uploadingFile,
   atFileLimit,
@@ -46,6 +47,8 @@ export function Composer({
   disabled?: boolean
   /** False when SERPAPI_KEY is unset; the toggle is shown but not usable. */
   searchEnabled: boolean
+  /** Whether the picker offers images, which needs a vision model. */
+  imagesEnabled?: boolean
   files: AttachedFile[]
   uploadingFile: string | null
   atFileLimit: boolean
@@ -149,7 +152,7 @@ export function Composer({
           <input
             ref={filePicker}
             type="file"
-            accept={ACCEPT_ATTRIBUTE}
+            accept={acceptAttribute(imagesEnabled)}
             className="hidden"
             onChange={(event) => {
               const chosen = event.target.files?.[0]

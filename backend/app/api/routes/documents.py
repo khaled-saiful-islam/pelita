@@ -14,6 +14,7 @@ from app.api.deps import CurrentUser, SessionDep, SettingsDep
 from app.api.schemas.document import DocumentList, DocumentResponse
 from app.core.errors import ValidationError
 from app.services.document_service import DocumentService, human_size
+from app.vision.registry import build_image_reader
 
 router = APIRouter(prefix="/conversations/{conversation_id}/documents", tags=["documents"])
 
@@ -24,6 +25,11 @@ def _service(session, settings) -> DocumentService:
         max_bytes=settings.document_max_bytes,
         max_per_conversation=settings.document_max_per_conversation,
         model=settings.llm_model,
+        # None unless VISION_MODEL is set, which is what decides whether an
+        # image is a supported file type at all.
+        reader=build_image_reader(settings),
+        image_max_pixels=settings.vision_max_pixels,
+        image_jpeg_quality=settings.vision_jpeg_quality,
     )
 
 

@@ -66,6 +66,8 @@ export interface AttachedFile {
   unit: string
   unit_count: number
   token_count: number
+  /** A data URI, images only — what the card shows instead of a file icon. */
+  thumbnail?: string | null
   created_at: string
 }
 

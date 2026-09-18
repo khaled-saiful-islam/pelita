@@ -10,10 +10,18 @@ interface DocumentList {
   max_bytes: number
 }
 
-const ACCEPTED_EXTENSIONS = ['.txt', '.md', '.markdown', '.csv', '.json', '.pdf', '.docx']
+const DOCUMENT_EXTENSIONS = ['.txt', '.md', '.markdown', '.csv', '.json', '.pdf', '.docx']
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']
 
-/** What the file picker offers, and what the client checks before uploading. */
-export const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(',')
+/**
+ * What the file picker offers, and what the client checks before uploading.
+ *
+ * Images only when a vision model is configured — offering a picker that
+ * accepts a photo the server will refuse is worse than not offering it.
+ */
+export function acceptAttribute(images: boolean): string {
+  return (images ? [...DOCUMENT_EXTENSIONS, ...IMAGE_EXTENSIONS] : DOCUMENT_EXTENSIONS).join(',')
+}
 
 export function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024)
@@ -50,7 +58,10 @@ export interface UseDocuments {
  * upload first. The server checks them again — this is a courtesy, not a
  * control.
  */
-export function useDocuments(conversationId: string | null): UseDocuments {
+export function useDocuments(
+  conversationId: string | null,
+  { images = false }: { images?: boolean } = {},
+): UseDocuments {
   const [files, setFiles] = useState<AttachedFile[]>([])
   const [maxFiles, setMaxFiles] = useState(3)
   const [maxBytes, setMaxBytes] = useState(5 * 1024 * 1024)
@@ -82,7 +93,7 @@ export function useDocuments(conversationId: string | null): UseDocuments {
     async (file: File, targetConversationId: string) => {
       setError(null)
 
-      const problem = precheck(file, { files, maxFiles, maxBytes })
+      const problem = precheck(file, { files, maxFiles, maxBytes, images })
       if (problem) {
         setError(problem)
         return
@@ -107,7 +118,7 @@ export function useDocuments(conversationId: string | null): UseDocuments {
         setUploading(null)
       }
     },
-    [files, maxFiles, maxBytes],
+    [files, maxFiles, maxBytes, images],
   )
 
   /**
@@ -155,14 +166,20 @@ export function useDocuments(conversationId: string | null): UseDocuments {
   }
 }
 
-/** The same three rules the server enforces, worded the same way. */
+/** The same rules the server enforces, worded the same way. */
 function precheck(
   file: File,
-  limits: { files: AttachedFile[]; maxFiles: number; maxBytes: number },
+  limits: { files: AttachedFile[]; maxFiles: number; maxBytes: number; images: boolean },
 ): string | null {
   const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
-  if (!ACCEPTED_EXTENSIONS.includes(extension)) {
-    return `${file.name} is not a supported file type. Upload plain text, Markdown, CSV, JSON, PDF or Word (.docx).`
+  const accepted = limits.images
+    ? [...DOCUMENT_EXTENSIONS, ...IMAGE_EXTENSIONS]
+    : DOCUMENT_EXTENSIONS
+  if (!accepted.includes(extension)) {
+    if (!limits.images && IMAGE_EXTENSIONS.includes(extension)) {
+      return `${file.name} is an image, and no vision model is configured. Upload plain text, Markdown, CSV, JSON, PDF or Word (.docx).`
+    }
+    return `${file.name} is not a supported file type. Upload plain text, Markdown, CSV, JSON, PDF or Word (.docx)${limits.images ? ', or an image' : ''}.`
   }
   if (file.size === 0) {
     return `${file.name} is empty.`

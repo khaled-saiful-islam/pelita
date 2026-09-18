@@ -80,7 +80,9 @@ def test_files_are_classified_by_extension_then_media_type(filename, media_type,
     assert classify(filename=filename, media_type=media_type) == expected
 
 
-@pytest.mark.parametrize("filename", ["app.exe", "photo.png", "archive.zip"])
+# photo.png is not here: an image gets its own refusal naming the missing
+# vision model, which `test_vision.py` covers.
+@pytest.mark.parametrize("filename", ["app.exe", "archive.zip", "song.mp3"])
 def test_unsupported_types_are_named_in_the_error(filename: str) -> None:
     with pytest.raises(UnsupportedDocument, match="not a supported file type"):
         classify(filename=filename, media_type="application/octet-stream")

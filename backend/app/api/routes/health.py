@@ -39,6 +39,7 @@ async def public_config() -> dict[str, object]:
         "app_name": settings.app_name,
         "model": settings.llm_model,
         "search_enabled": settings.search_enabled,
+        "images_enabled": settings.vision_enabled,
         "currency": settings.llm_price_currency,
         "supported_languages": settings.supported_language_list,
     }

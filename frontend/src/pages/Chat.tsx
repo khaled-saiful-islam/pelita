@@ -38,7 +38,7 @@ export default function Chat() {
   const { load, reset } = chat
 
   const activeConversationId = chat.conversationId ?? routeId ?? null
-  const documents = useDocuments(activeConversationId)
+  const documents = useDocuments(activeConversationId, { images: config?.images_enabled ?? false })
 
   useEffect(() => {
     setLoadError(null)
@@ -184,6 +184,7 @@ export default function Chat() {
           onStop={chat.stop}
           streaming={chat.streaming}
           searchEnabled={config?.search_enabled ?? false}
+          imagesEnabled={config?.images_enabled ?? false}
           files={documents.pending}
           uploadingFile={documents.uploading}
           atFileLimit={documents.files.length >= documents.maxFiles}
