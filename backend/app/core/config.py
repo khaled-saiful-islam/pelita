@@ -87,6 +87,21 @@ class Settings(BaseSettings):
     document_max_bytes: int = 5 * 1024 * 1024
     document_max_per_conversation: int = 3
 
+    # ---- Rate limiting ----------------------------------------------------
+    # Per minute. 0 disables an individual limit; rate_limit_enabled=false
+    # disables all of them. Chat and upload are counted per user, auth per
+    # client address — the point of the auth limit is the requests made before
+    # anyone is signed in.
+    rate_limit_enabled: bool = True
+    rate_limit_chat_per_minute: int = 20
+    rate_limit_upload_per_minute: int = 10
+    rate_limit_auth_per_minute: int = 10
+    # nginx appends the real peer to any X-Forwarded-For the client sent, so the
+    # LAST entry is the trustworthy one. Set false when the API is exposed
+    # directly: then the header is entirely client-controlled and believing it
+    # lets anyone reset their own limit by inventing an address.
+    trust_proxy_headers: bool = True
+
     # ---- Tool calling -----------------------------------------------------
     # When true and the provider supports it, the model is handed the tool list
     # and chooses. False falls back to choosing from the question with patterns,

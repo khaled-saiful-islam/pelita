@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes import auth, chat, conversations, documents, health, memories, news
 from app.core.config import deployment_warnings, get_settings
-from app.core.errors import PelitaError
+from app.core.errors import PelitaError, RateLimitError
 from app.core.logging import configure_logging
 
 settings = get_settings()
@@ -76,9 +76,17 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(PelitaError)
     async def handle_pelita_error(_: Request, exc: PelitaError) -> JSONResponse:
+        # Retry-After is the only header any of these carry, and it is the
+        # difference between a client backing off and a client hammering.
+        headers = (
+            {"Retry-After": str(exc.retry_after)}
+            if isinstance(exc, RateLimitError)
+            else None
+        )
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"code": exc.code, "message": exc.message}},
+            headers=headers,
         )
 
     app.include_router(health.router, prefix="/api")

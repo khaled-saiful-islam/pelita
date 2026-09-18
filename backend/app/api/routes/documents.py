@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
-from app.api.deps import CurrentUser, SessionDep, SettingsDep
+from app.api.deps import CurrentUser, SessionDep, SettingsDep, limit_upload
 from app.api.schemas.document import DocumentList, DocumentResponse
 from app.core.errors import ValidationError
 from app.services.document_service import DocumentService, human_size
@@ -46,7 +46,12 @@ async def index(
     )
 
 
-@router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_upload)],
+)
 async def upload(
     conversation_id: UUID,
     session: SessionDep,

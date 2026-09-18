@@ -13,10 +13,10 @@ import logging
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 from sse_starlette.sse import EventSourceResponse
 
-from app.api.deps import ChatServiceDep, CurrentUser, SessionDep
+from app.api.deps import ChatServiceDep, CurrentUser, SessionDep, limit_chat
 from app.api.schemas.chat import FeedbackRequest, FeedbackResponse, SendMessageRequest
 from app.core.errors import PelitaError
 from app.services.events import (
@@ -131,7 +131,7 @@ def _to_sse(event: object) -> dict[str, str] | None:
             return None
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=[Depends(limit_chat)])
 async def stream(
     payload: SendMessageRequest,
     chat: ChatServiceDep,

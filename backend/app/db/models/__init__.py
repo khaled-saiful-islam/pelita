@@ -12,6 +12,7 @@ from app.db.models.feedback import MessageFeedback
 from app.db.models.guard_event import GuardEvent
 from app.db.models.memory import Memory
 from app.db.models.news import NewsCache
+from app.db.models.rate_limit import RateLimitHit
 from app.db.models.source import MessageSource
 from app.db.models.user import User
 
@@ -24,5 +25,6 @@ __all__ = [
     "MessageFeedback",
     "MessageSource",
     "NewsCache",
+    "RateLimitHit",
     "User",
 ]

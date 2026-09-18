@@ -43,6 +43,18 @@ class ForbiddenError(PelitaError):
     code = "forbidden"
 
 
+class RateLimitError(PelitaError):
+    """Too many requests. Carries how long to wait, because a 429 without it
+    leaves a client guessing — and guessing usually means retrying at once."""
+
+    status_code = 429
+    code = "rate_limited"
+
+    def __init__(self, message: str, *, retry_after: int) -> None:
+        super().__init__(message)
+        self.retry_after = max(1, retry_after)
+
+
 class UpstreamError(PelitaError):
     """A dependency failed in a way the user should be told about."""
 

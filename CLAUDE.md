@@ -99,7 +99,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 87% backend, across 576 backend and 44 frontend tests.
+Target 80%. Currently 87% backend, across 596 backend and 44 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -116,6 +116,9 @@ Target 80%. Currently 87% backend, across 576 backend and 44 frontend tests.
 Three real ones shipped past curl and unit tests. Check the browser console
 before claiming a feature works:
 
+- **A rate-limit increment rolled back with the request that failed.** Anything
+  counted on a path that then raises must commit itself, or the endpoint most
+  worth limiting is the one with no limit. `RateLimiter.check` commits.
 - `sse-starlette` frames with **CRLF**; a parser matching `\n\n` found nothing
   while the request still returned 200.
 - **A failed `docker compose build web` leaves the old image running.** The
@@ -288,3 +291,8 @@ Be honest about these rather than discovering them:
   password". Do not make it more helpful.
 - Ownership is a **parameter of the lookup** (`repo.get(id, user_id)`), not a
   check the caller must remember. Keep it that way in new repositories.
+- **Rate limits are counted in Postgres**, not in memory, so they hold across
+  workers. Chat and uploads per user, auth per address.
+- **`X-Forwarded-For`: read the LAST hop, never the first.** nginx appends the
+  real peer to whatever the client sent, so the first entry is attacker-supplied
+  and trusting it makes any per-address limit decorative.

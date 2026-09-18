@@ -56,6 +56,7 @@ default.
 | **Follow-up suggestions** | Three chips after each answer |
 | **Prompt-injection guard** | Scans your input *and* text from search and news before it reaches the prompt, with a banner naming what it found |
 | **Accounts** | Sign-up, sign-in, profile, JWT in an httpOnly cookie |
+| **Rate limiting** | Per-user caps on chat and uploads, per-address on sign-in. Counted in Postgres, so it survives more than one worker |
 | **Export** | Any conversation as Markdown |
 | **Theme** | Light, dark, or follow the system |
 
@@ -85,6 +86,7 @@ is the only prerequisite.
 | `DOCUMENT_MAX_BYTES` / `_MAX_PER_CONVERSATION` | `5 MB` / `3` | Attached-file limits. Raising the size means raising `client_max_body_size` in `frontend/nginx.conf` too |
 | `VISION_MODEL` | *(empty)* | Enables image upload. `gpt-4o-mini`, `llama-3.2-11b-vision-preview`, `llava`. Defaults to the `LLM_` URL and key |
 | `TOOL_MAX_ITERATIONS` | `3` | Rounds of tool calls per turn — the cost ceiling, since each is another model call |
+| `RATE_LIMIT_CHAT_PER_MINUTE` | `20` | Messages per user. `TRUST_PROXY_HEADERS=false` if you expose the API without nginx |
 | `SUPPORTED_LANGUAGES` | `en,ms,ta,zh,bn` | Languages to detect between |
 | `MEMORY_AUTO_EXTRACT` | `true` | `false` removes one model call per turn |
 | `SUGGESTIONS_ENABLED` | `true` | `false` removes one model call per turn |
@@ -137,7 +139,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-576 backend tests and 44 frontend tests, 87% backend coverage. The
+596 backend tests and 44 frontend tests, 87% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.

@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Cookie, Depends, Header
+from fastapi import Cookie, Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.context.registry import build_contributors
@@ -26,6 +26,7 @@ from app.services.accounting_service import Pricing
 from app.services.auth_service import AuthService
 from app.services.cancellation import registry as cancellation_registry
 from app.services.chat_service import ChatService, TurnSettings
+from app.services.rate_limit import Limit, RateLimiter
 from app.tools.registry import build_tools
 
 
@@ -113,3 +114,46 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
 
 
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
+
+
+# --- rate limiting ------------------------------------------------------
+
+
+def client_address(request: Request, settings: Settings) -> str:
+    """The caller's address, as well as it can be known.
+
+    nginx sets `X-Forwarded-For $proxy_add_x_forwarded_for`, which *appends* the
+    real peer to whatever the client sent. So the last entry is the one the
+    proxy added and the only one worth believing — reading the first would let
+    anyone reset their own limit by sending a header.
+
+    With `trust_proxy_headers=false` the header is ignored entirely, which is
+    the right posture when the API is exposed without a proxy in front.
+    """
+    if settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        if hops:
+            return hops[-1][:128]
+    return (request.client.host if request.client else "unknown")[:128]
+
+
+async def limit_chat(session: SessionDep, settings: SettingsDep, user: CurrentUser) -> None:
+    """The expensive one: every request here can become several model calls."""
+    await RateLimiter(session, enabled=settings.rate_limit_enabled).check(
+        "chat", str(user.id), Limit(settings.rate_limit_chat_per_minute)
+    )
+
+
+async def limit_upload(session: SessionDep, settings: SettingsDep, user: CurrentUser) -> None:
+    await RateLimiter(session, enabled=settings.rate_limit_enabled).check(
+        "upload", str(user.id), Limit(settings.rate_limit_upload_per_minute)
+    )
+
+
+async def limit_auth(request: Request, session: SessionDep, settings: SettingsDep) -> None:
+    """Per address, because these are the endpoints reached before anyone is
+    signed in — and the ones worth guessing passwords at."""
+    await RateLimiter(session, enabled=settings.rate_limit_enabled).check(
+        "auth", client_address(request, settings), Limit(settings.rate_limit_auth_per_minute)
+    )

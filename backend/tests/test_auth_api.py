@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.api.deps import get_auth_service, get_session
+from app.api.deps import get_auth_service, get_session, limit_auth
 from app.core.config import INSECURE_JWT_SECRET, Settings, deployment_warnings
 from app.core.security import hash_password
 from app.main import create_app
@@ -35,11 +35,18 @@ def client(repo: FakeUserRepository) -> httpx.AsyncClient:
     app = create_app()
     app.dependency_overrides[get_auth_service] = lambda: AuthService(repo)
     app.dependency_overrides[get_session] = _no_session
+    # Counting needs a real database, and these tests do not have one by
+    # design. The limit has its own tests, including against this same endpoint.
+    app.dependency_overrides[limit_auth] = _no_limit
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
 async def _no_session():
     yield None
+
+
+async def _no_limit() -> None:
+    return None
 
 
 async def test_signin_sets_an_httponly_cookie_and_returns_the_user(client) -> None:

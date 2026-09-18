@@ -7,9 +7,9 @@ header for scripts and API clients.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Depends, Response, status
 
-from app.api.deps import AuthServiceDep, CurrentUser, SettingsDep
+from app.api.deps import AuthServiceDep, CurrentUser, SettingsDep, limit_auth
 from app.api.schemas.auth import (
     ChangePasswordRequest,
     SignInRequest,
@@ -39,7 +39,12 @@ def _set_session_cookie(response: Response, token: str, settings: Settings) -> N
     )
 
 
-@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/signup",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_auth)],
+)
 async def sign_up(
     payload: SignUpRequest,
     auth: AuthServiceDep,
@@ -53,7 +58,7 @@ async def sign_up(
     return UserResponse.model_validate(result.user)
 
 
-@router.post("/signin", response_model=UserResponse)
+@router.post("/signin", response_model=UserResponse, dependencies=[Depends(limit_auth)])
 async def sign_in(
     payload: SignInRequest,
     auth: AuthServiceDep,
@@ -85,7 +90,11 @@ async def update_profile(
     return UserResponse.model_validate(updated)
 
 
-@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/me/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(limit_auth)],
+)
 async def change_password(
     payload: ChangePasswordRequest,
     auth: AuthServiceDep,
