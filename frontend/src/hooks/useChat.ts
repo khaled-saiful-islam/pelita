@@ -9,7 +9,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 import { readSse } from '@/lib/sse'
-import { addUsage, dispatchFrame, mergeTool } from '@/lib/chat-events'
+import { addUsage, dispatchFrame, mergeSources, mergeTool } from '@/lib/chat-events'
 import { splitStoredSources } from '@/lib/messages'
 import type {
   AttachedFile,
@@ -232,7 +232,15 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               )
             },
             onImages: (images) => patchActive({ images }),
-            onSources: (sources) => patchActive({ sources }),
+            onSources: (sources) => {
+              const id = assistantIdRef.current
+              if (!id) return
+              setMessages((current) =>
+                current.map((m) =>
+                  m.id === id ? { ...m, sources: mergeSources(m.sources, sources) } : m,
+                ),
+              )
+            },
             onToken: (text) => {
               const id = assistantIdRef.current
               if (!id) return

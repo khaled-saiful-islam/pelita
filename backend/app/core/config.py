@@ -87,6 +87,15 @@ class Settings(BaseSettings):
     document_max_bytes: int = 5 * 1024 * 1024
     document_max_per_conversation: int = 3
 
+    # ---- Tool calling -----------------------------------------------------
+    # When true and the provider supports it, the model is handed the tool list
+    # and chooses. False falls back to choosing from the question with patterns,
+    # which is also what happens automatically when a provider rejects `tools`.
+    tool_calling_enabled: bool = True
+    # How many rounds of tool calls one turn may make. Each round is another
+    # model call, so this is the cost ceiling as much as the loop guard.
+    tool_max_iterations: int = 3
+
     # ---- Vision ----------------------------------------------------------
     # Reading an uploaded image needs a model that can see, which is rarely the
     # same one that writes the answers. Empty `vision_model` turns the feature

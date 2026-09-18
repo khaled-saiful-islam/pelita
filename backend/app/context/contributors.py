@@ -6,10 +6,12 @@ usually two contributors, or a service with a thin contributor in front of it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from app.context.base import ContextContributor, TurnContext, assistant, system, user
 from app.context.pipeline import trim_to_budget
 from app.core.tokens import count_tokens
-from app.providers.base import ChatMessage, Role
+from app.providers.base import ChatMessage, Role, ToolResult
 from app.services.language_service import reply_instruction
 
 
@@ -90,39 +92,51 @@ class ToolResultsContributor(ContextContributor):
 
         messages: list[ChatMessage] = []
         if images:
-            # Without this the model says "I cannot show you photos", which is
-            # false and directly contradicts the grid rendered above its answer.
-            titles = "; ".join(r.title for r in images[:4])
+            messages.append(system(images_already_shown(images)))
+        if documents:
             messages.append(
-                system(
-                    f"{len(images)} matching images are already displayed to the user "
-                    f"above your reply ({titles}). Do not say you cannot show images "
-                    "and do not list their URLs. Describe or discuss the subject, and "
-                    "add anything useful the pictures do not convey."
-                )
+                system(format_results(documents, model=ctx.model, budget=ctx.budget.tools))
             )
-
-        if not documents:
-            return messages
-
-        lines: list[str] = [
-            "Search results are given below. Use them to answer, and cite the "
-            "ones you rely on inline as [1], [2] and so on. If they do not "
-            "answer the question, say so rather than inventing a source.",
-            "",
-        ]
-        used = count_tokens("\n".join(lines), ctx.model)
-
-        for result in documents:
-            block = f"[{result.rank}] {result.title}\n{result.url}\n{result.snippet}".strip()
-            cost = count_tokens(block, ctx.model)
-            if used + cost > ctx.budget.tools:
-                break
-            lines.extend([block, ""])
-            used += cost
-
-        messages.append(system("\n".join(lines).strip()))
         return messages
+
+
+def images_already_shown(images: Sequence[ToolResult]) -> str:
+    """Told to the model because otherwise it says "I cannot show you photos",
+    which is false and directly contradicts the grid above its answer."""
+    titles = "; ".join(r.title for r in images[:4])
+    return (
+        f"{len(images)} matching images are already displayed to the user "
+        f"above your reply ({titles}). Do not say you cannot show images "
+        "and do not list their URLs. Describe or discuss the subject, and "
+        "add anything useful the pictures do not convey."
+    )
+
+
+def format_results(results: Sequence[ToolResult], *, model: str, budget: int) -> str:
+    """Numbered results plus the instruction to cite them.
+
+    Shared by the contributor and the tool-calling loop, which put the same text
+    in different places — a system message when the turn chose the tool, a tool
+    message when the model did. One copy, so the citation numbering and the
+    instruction cannot drift apart between the two paths.
+    """
+    lines: list[str] = [
+        "Search results are given below. Use them to answer, and cite the "
+        "ones you rely on inline as [1], [2] and so on. If they do not "
+        "answer the question, say so rather than inventing a source.",
+        "",
+    ]
+    used = count_tokens("\n".join(lines), model)
+
+    for result in results:
+        block = f"[{result.rank}] {result.title}\n{result.url}\n{result.snippet}".strip()
+        cost = count_tokens(block, model)
+        if used + cost > budget:
+            break
+        lines.extend([block, ""])
+        used += cost
+
+    return "\n".join(lines).strip()
 
 
 class HistoryContributor(ContextContributor):

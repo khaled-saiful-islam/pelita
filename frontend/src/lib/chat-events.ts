@@ -66,9 +66,30 @@ export function mergeTool(
   next: ToolActivity,
 ): ToolActivity[] {
   const list = existing ?? []
-  const index = list.findIndex((activity) => activity.tool === next.tool)
+  // A tool that is still running is updated in place; a finished one stays and
+  // the next run is its own chip. Two searches in a turn are two things that
+  // happened, and collapsing them hides the second one's results entirely.
+  const index = list.findIndex(
+    (activity) => activity.tool === next.tool && activity.status === 'running',
+  )
   if (index === -1) return [...list, next]
   return list.map((activity, i) => (i === index ? next : activity))
+}
+
+/**
+ * Sources from every round of a turn, in citation order.
+ *
+ * Appended rather than replaced: the model may search more than once, the
+ * server numbers the second batch after the first, and replacing left `[3]`
+ * pointing at nothing while `[8]` pointed at a list of five.
+ */
+export function mergeSources(
+  existing: Source[] | undefined,
+  next: Source[],
+): Source[] {
+  const byRank = new Map((existing ?? []).map((source) => [source.rank, source]))
+  for (const source of next) byRank.set(source.rank, source)
+  return [...byRank.values()].sort((a, b) => a.rank - b.rank)
 }
 
 /** Add this turn's usage to the conversation running total. */

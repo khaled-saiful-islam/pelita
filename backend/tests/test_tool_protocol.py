@@ -8,17 +8,47 @@ service, one of these fails.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
 import pytest
 
 from app.core.config import Settings
-from app.providers.base import ToolResult
+from app.providers.base import ToolCall, ToolResult
 from app.services.events import ImagesEvent, SourcesEvent, ToolEvent
 from app.tools.base import Tool, ToolPresentation, ToolUnavailable, text_parameter
 from app.tools.registry import build_tools
 from tests.test_chat_service import FakeProvider, build_service, collect
+
+# The seam has two paths to the same tool: the turn picking one from the
+# question, and the model asking for it. Every claim below is asserted against
+# both, because "the service never names a tool" has to hold on each.
+PATHS = ["patterns", "model"]
+
+
+def service_for(path, session, registry, tool, *, chunks=None, query="weather please"):
+    """A service on one of the two paths, running the same tool either way.
+
+    The registry key differs by necessity: the pattern path finds a tool by the
+    slot it occupies, the model path by the name the tool gives itself. That the
+    two disagree is exactly why dispatch re-keys on `tool.name`.
+    """
+    provider = FakeProvider(
+        chunks or ["ok"],
+        tool_calls=(
+            [ToolCall(id="call_1", name=tool.name, arguments=json.dumps({"query": query}))]
+            if path == "model"
+            else None
+        ),
+    )
+    return build_service(
+        session,
+        provider,
+        registry,
+        tools={"web_search": tool},
+        tool_calling=path == "model",
+    )
 
 
 class WeatherTool(Tool):
@@ -77,32 +107,31 @@ def test_every_tool_describes_itself_well_enough_for_a_model_to_choose() -> None
 # --- running an unknown tool -------------------------------------------
 
 
+@pytest.mark.parametrize("path", PATHS)
 async def test_a_tool_the_service_has_never_heard_of_runs_unchanged(
-    session, db_user, registry
+    session, db_user, registry, path
 ) -> None:
     """The point of the seam: no branch in chat_service names this tool."""
+    question = "what is the current weather in KL?"
     weather = WeatherTool()
-    service = build_service(
-        session, FakeProvider(["ok"]), registry, tools={"web_search": weather}
-    )
+    service = service_for(path, session, registry, weather, query=question)
 
     events = await collect(
         service,
         user_id=db_user.id,
         conversation_id=None,
-        content="what is the current weather in KL?",
+        content=question,
         search_mode="always",
     )
 
-    assert weather.calls == [{"query": "what is the current weather in KL?"}]
+    assert weather.calls == [{"query": question}]
     labels = [e.label for e in events if isinstance(e, ToolEvent)]
     assert labels == ["Checking the weather", "Checked the weather"]
 
 
-async def test_its_results_become_sources(session, db_user, registry) -> None:
-    service = build_service(
-        session, FakeProvider(["ok"]), registry, tools={"web_search": WeatherTool()}
-    )
+@pytest.mark.parametrize("path", PATHS)
+async def test_its_results_become_sources(session, db_user, registry, path) -> None:
+    service = service_for(path, session, registry, WeatherTool())
     events = await collect(
         service,
         user_id=db_user.id,
@@ -115,11 +144,12 @@ async def test_its_results_become_sources(session, db_user, registry) -> None:
     assert sources[0].title == "Kuala Lumpur forecast"
 
 
-async def test_the_done_label_reports_the_tools_own_noun(session, db_user, registry) -> None:
+@pytest.mark.parametrize("path", PATHS)
+async def test_the_done_label_reports_the_tools_own_noun(
+    session, db_user, registry, path
+) -> None:
     """"1 reading in 0.0s", not "1 result" — the service does not name it."""
-    service = build_service(
-        session, FakeProvider(["ok"]), registry, tools={"web_search": WeatherTool()}
-    )
+    service = service_for(path, session, registry, WeatherTool())
     events = await collect(
         service,
         user_id=db_user.id,
@@ -132,14 +162,16 @@ async def test_the_done_label_reports_the_tools_own_noun(session, db_user, regis
     assert done.detail.startswith("1 reading in ")
 
 
+@pytest.mark.parametrize("path", PATHS)
 async def test_a_failing_tool_degrades_the_turn_without_ending_it(
-    session, db_user, registry
+    session, db_user, registry, path
 ) -> None:
-    service = build_service(
+    service = service_for(
+        path,
         session,
-        FakeProvider(["answered anyway"]),
         registry,
-        tools={"web_search": WeatherTool(fail="station offline")},
+        WeatherTool(fail="station offline"),
+        chunks=["answered anyway"],
     )
     events = await collect(
         service,
@@ -156,8 +188,9 @@ async def test_a_failing_tool_degrades_the_turn_without_ending_it(
     )
 
 
+@pytest.mark.parametrize("path", PATHS)
 async def test_image_results_are_recognised_by_shape_not_by_tool_name(
-    session, db_user, registry
+    session, db_user, registry, path
 ) -> None:
     """A tool returning results with thumbnails gets the image grid, whatever
     it is called."""
@@ -177,9 +210,7 @@ async def test_image_results_are_recognised_by_shape_not_by_tool_name(
                 )
             ]
 
-    service = build_service(
-        session, FakeProvider(["ok"]), registry, tools={"web_search": Pictures()}
-    )
+    service = service_for(path, session, registry, Pictures())
     events = await collect(
         service,
         user_id=db_user.id,

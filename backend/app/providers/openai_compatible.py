@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 import httpx
 
@@ -25,6 +26,8 @@ from app.providers.base import (
     ProviderInfo,
     StreamEvent,
     TokenEvent,
+    ToolCall,
+    ToolCallsEvent,
     Usage,
     UsageEvent,
     UsageSource,
@@ -35,6 +38,55 @@ logger = logging.getLogger(__name__)
 
 _SSE_DATA_PREFIX = "data:"
 _SSE_DONE = "[DONE]"
+
+
+@dataclass
+class _PartialCall:
+    """A tool call still arriving. Mutable because that is what it is for."""
+
+    id: str = ""
+    name: str = ""
+    arguments: str = ""
+
+
+def _absorb_call_fragment(calls: dict[int, _PartialCall], fragment: dict) -> None:
+    """Merge one streamed tool-call delta into the call it belongs to.
+
+    Only the first fragment carries the id and name; the rest are argument
+    text. Some providers omit `index` when there is a single call, so it
+    defaults to 0 rather than starting a new call per chunk.
+    """
+    partial = calls.setdefault(int(fragment.get("index") or 0), _PartialCall())
+    if identifier := fragment.get("id"):
+        partial.id = str(identifier)
+    function = fragment.get("function") or {}
+    if name := function.get("name"):
+        partial.name = str(name)
+    if arguments := function.get("arguments"):
+        partial.arguments += str(arguments)
+
+
+def _assemble_calls(calls: dict[int, _PartialCall]) -> tuple[ToolCall, ...]:
+    """Finished calls, in the order the provider indexed them.
+
+    A fragment with no name is dropped: it cannot be dispatched, and a call
+    with an empty name would be reported as an unknown tool rather than as the
+    provider bug it is.
+    """
+    assembled = []
+    for index in sorted(calls):
+        partial = calls[index]
+        if not partial.name:
+            logger.info("dropping a tool-call fragment with no function name")
+            continue
+        assembled.append(
+            ToolCall(
+                id=partial.id or f"call_{index}",
+                name=partial.name,
+                arguments=partial.arguments or "{}",
+            )
+        )
+    return tuple(assembled)
 
 
 def _finish_reason(raw: str | None) -> FinishReason:
@@ -63,6 +115,9 @@ class OpenAICompatibleProvider(LLMProvider):
         # Set to False the first time a provider rejects stream_options, so the
         # rest of the process stops sending it. Ollama and some vLLM builds do.
         self._send_stream_options = True
+        # Same idea, for providers that 400 on a `tools` payload. Dropped for
+        # the rest of the process so one rejection costs one request.
+        self._send_tools = True
         self.info = ProviderInfo(
             name="openai-compatible",
             model=model,
@@ -89,6 +144,10 @@ class OpenAICompatibleProvider(LLMProvider):
         }
         if stream and self._send_stream_options:
             payload["stream_options"] = {"include_usage": True}
+        if req.tools and self._send_tools:
+            payload["tools"] = list(req.tools)
+            if req.tool_choice is not None:
+                payload["tool_choice"] = req.tool_choice
         return payload
 
     def _raise_for_status(self, response: httpx.Response, body: str) -> None:
@@ -125,10 +184,13 @@ class OpenAICompatibleProvider(LLMProvider):
         completed: list[str] = []
         reported_usage: Usage | None = None
         finish: FinishReason = FinishReason.STOP
+        # Keyed by the index the provider assigns, because arguments arrive a
+        # few characters per chunk and only the index ties the pieces together.
+        partial_calls: dict[int, _PartialCall] = {}
 
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                async for event in self._stream_once(client, req, completed):
+                async for event in self._stream_once(client, req, completed, partial_calls):
                     if isinstance(event, UsageEvent):
                         reported_usage = event.usage
                         continue
@@ -144,6 +206,13 @@ class OpenAICompatibleProvider(LLMProvider):
             logger.warning("provider transport error: %s", exc)
             raise ProviderError("Could not reach the model. Check LLM_BASE_URL.") from exc
 
+        calls = _assemble_calls(partial_calls)
+        if calls:
+            # A provider may report `stop` while still having asked for a tool.
+            # What it asked for is the more reliable signal.
+            finish = FinishReason.TOOL_CALLS
+            yield ToolCallsEvent(calls=calls)
+
         text = "".join(completed)
         usage = reported_usage or Usage(
             prompt_tokens=prompt_tokens_estimate,
@@ -158,6 +227,7 @@ class OpenAICompatibleProvider(LLMProvider):
         client: httpx.AsyncClient,
         req: ChatRequest,
         sink: list[str],
+        calls: dict[int, _PartialCall],
     ) -> AsyncIterator[StreamEvent]:
         url = f"{self._base_url}/chat/completions"
         async with client.stream(
@@ -180,18 +250,45 @@ class OpenAICompatibleProvider(LLMProvider):
                         model=self.info.model,
                         base_url=self.info.base_url,
                         supports_usage_in_stream=False,
+                        supports_tools=self.info.supports_tools,
                     )
-                    async for event in self._stream_once(client, req, sink):
+                    async for event in self._stream_once(client, req, sink, calls):
+                        yield event
+                    return
+                if self._rejected_tools(response.status_code, body, req):
+                    # No tool calling here. Retrying without it loses the model's
+                    # choice, not the tool — the turn picks one itself instead.
+                    logger.info("provider rejected tools; disabling and retrying")
+                    self._send_tools = False
+                    self.info = ProviderInfo(
+                        name=self.info.name,
+                        model=self.info.model,
+                        base_url=self.info.base_url,
+                        supports_usage_in_stream=self.info.supports_usage_in_stream,
+                        supports_tools=False,
+                    )
+                    async for event in self._stream_once(client, req, sink, calls):
                         yield event
                     return
                 self._raise_for_status(response, body)
 
             async for line in response.aiter_lines():
-                event = self._parse_line(line, sink)
+                event = self._parse_line(line, sink, calls)
                 if event is not None:
                     yield event
 
-    def _parse_line(self, line: str, sink: list[str]) -> StreamEvent | None:
+    def _rejected_tools(self, status: int, body: str, req: ChatRequest) -> bool:
+        lowered = body.lower()
+        return (
+            status in (400, 404, 422)
+            and bool(req.tools)
+            and self._send_tools
+            and ("tool" in lowered or "function" in lowered)
+        )
+
+    def _parse_line(
+        self, line: str, sink: list[str], calls: dict[int, _PartialCall]
+    ) -> StreamEvent | None:
         line = line.strip()
         if not line or not line.startswith(_SSE_DATA_PREFIX):
             return None
@@ -217,9 +314,16 @@ class OpenAICompatibleProvider(LLMProvider):
         if not choices:
             return None
         choice = choices[0]
+        delta = choice.get("delta") or {}
+
+        # Checked before finish_reason: the last chunk of a tool call often
+        # carries both, and dropping the fragment loses the closing brace.
+        for fragment in delta.get("tool_calls") or []:
+            _absorb_call_fragment(calls, fragment)
+
         if reason := choice.get("finish_reason"):
             return FinishEvent(reason=_finish_reason(reason))
-        text = (choice.get("delta") or {}).get("content")
+        text = delta.get("content")
         if text:
             sink.append(text)
             return TokenEvent(text=text)
@@ -260,6 +364,17 @@ class OpenAICompatibleProvider(LLMProvider):
                 completion_tokens=count_tokens(text, self._model),
                 source=UsageSource.ESTIMATED,
             )
+        raw_calls = (choice.get("message") or {}).get("tool_calls") or []
         return Completion(
-            text=text, usage=usage, finish_reason=_finish_reason(choice.get("finish_reason"))
+            text=text,
+            usage=usage,
+            finish_reason=_finish_reason(choice.get("finish_reason")),
+            tool_calls=tuple(
+                ToolCall(
+                    id=str(call.get("id") or ""),
+                    name=str((call.get("function") or {}).get("name") or ""),
+                    arguments=str((call.get("function") or {}).get("arguments") or "{}"),
+                )
+                for call in raw_calls
+            ),
         )

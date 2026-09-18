@@ -99,7 +99,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 87% backend, across 544 backend and 38 frontend tests.
+Target 80%. Currently 87% backend, across 576 backend and 44 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -118,6 +118,13 @@ before claiming a feature works:
 
 - `sse-starlette` frames with **CRLF**; a parser matching `\n\n` found nothing
   while the request still returned 200.
+- **A failed `docker compose build web` leaves the old image running.** The
+  browser then shows behaviour you already fixed. `make lint` type-checks the
+  app; `npm run build` also type-checks the tests, so a bad test file fails the
+  deploy and not the lint.
+- **`index.html` must never be cached.** It names the hashed bundles, so a
+  cached copy pins the whole app to an old deploy while the new one sits there
+  being served to nobody.
 - Calling `request.is_disconnected()` inside an SSE generator puts a second
   reader on the ASGI receive channel and corrupts the close handshake.
 - Images rendered while streaming and vanished on reload, because the restore
@@ -191,10 +198,21 @@ place selection happens. `backend/tests/test_tool_protocol.py` adds a tool the
 codebase has never heard of and asserts it runs, labels itself and fails
 gracefully — so the claim is checked, not asserted.
 
-**For agent/tool-calling work:** `description` and `parameters` exist so a model
-can be handed the tool list and choose. Replace `_select_tool` with that choice,
-and make `_prepare`/`_generate` loop until the model stops asking. Nothing else
-in the turn needs to change.
+**The model already chooses.** `_generate` loops: stream → tool calls → run →
+stream again, capped by `TOOL_MAX_ITERATIONS`. `_select_tool` survives as the
+fallback for providers without function calling, and is used when
+`TOOL_CALLING_ENABLED=false` or a `tools` payload is rejected.
+
+Things to keep true when changing the loop:
+
+- **Every tool call gets a tool message**, failures included. An unanswered
+  `tool_call_id` is a protocol error on the next request.
+- **Calls that were not offered are ignored**, or the iteration cap is advisory.
+- **Usage sums across rounds.** A two-round turn paid for three model calls.
+- **Results are renumbered** as they arrive (`TurnState.absorb`), so two
+  searches do not both produce a `[1]`.
+- **`tool_results` is withheld from `TurnContext`** on the model path — they are
+  already in the exchange, and passing both sends every page twice.
 
 Results with a `thumbnail_url` render as an image grid; results without render
 as citations. That is decided by shape, not by tool name, so a new tool that
@@ -208,8 +226,10 @@ Be honest about these rather than discovering them:
   silently breaks the stop button.
 - **Pattern layers are English-only** — search intent, image intent, and the
   injection guard.
-- **One tool per turn.** `_select_tool` returns a single tool; running several,
-  or the same one repeatedly, is the agent-loop change described above.
+- **One round's calls run in sequence**, not in parallel. `_dispatch` is the
+  one place to change that.
+- **Fallback is per process.** One rejected `tools` payload disables tool
+  calling until restart, even if the 400 was transient.
 - **Document retrieval is keyword scoring**, not embeddings. It misses synonyms:
   a question about "notice period" does not rank a paragraph headed
   "Termination" any higher unless the word appears. Deliberate — it needs no

@@ -32,8 +32,11 @@ from app.providers.base import (
     ProviderError,
     ProviderInfo,
     Role,
+    StreamEvent,
     TokenBudget,
     TokenEvent,
+    ToolCall,
+    ToolCallsEvent,
     Usage,
     UsageSource,
 )
@@ -53,17 +56,42 @@ from app.services.events import (
 class FakeProvider:
     """Emits the given chunks, optionally pausing so a stop can land mid-stream."""
 
-    def __init__(self, chunks: list[str], *, delay: float = 0.0, fail: str | None = None) -> None:
+    def __init__(
+        self,
+        chunks: list[str],
+        *,
+        delay: float = 0.0,
+        fail: str | None = None,
+        tool_calls: list[ToolCall] | None = None,
+        supports_tools: bool = True,
+    ) -> None:
         self._chunks = chunks
         self._delay = delay
         self._fail = fail
+        # Asked for on the first pass only, exactly as a real model does: it
+        # requests tools, reads the results, then answers.
+        self._tool_calls = tool_calls or []
         self.received: ChatRequest | None = None
-        self.info = ProviderInfo(name="fake", model="fake-model", base_url="http://fake")
+        self.requests: list[ChatRequest] = []
+        self.info = ProviderInfo(
+            name="fake",
+            model="fake-model",
+            base_url="http://fake",
+            supports_tools=supports_tools,
+        )
 
-    async def stream_chat(self, req: ChatRequest) -> AsyncIterator[TokenEvent]:
+    async def stream_chat(self, req: ChatRequest) -> AsyncIterator[StreamEvent]:
         self.received = req
+        self.requests.append(req)
         if self._fail:
             raise ProviderError(self._fail)
+
+        if self._tool_calls and req.tools:
+            calls = tuple(self._tool_calls)
+            self._tool_calls = []
+            yield ToolCallsEvent(calls=calls)
+            return
+
         for chunk in self._chunks:
             if self._delay:
                 await asyncio.sleep(self._delay)
@@ -85,6 +113,7 @@ def build_service(
     suggestions: bool = False,
     extract: bool = False,
     tools: dict | None = None,
+    tool_calling: bool = False,
 ) -> ChatService:
     @asynccontextmanager
     async def session_maker():
@@ -120,6 +149,10 @@ def build_service(
             suggestions_enabled=suggestions,
             memory_auto_extract=extract,
             memory_max_per_user=100,
+            # Off by default: most tests are about the turn, and the fallback
+            # path keeps them to one provider call. The tool-calling tests turn
+            # it on explicitly.
+            tool_calling_enabled=tool_calling,
         ),
     )
 

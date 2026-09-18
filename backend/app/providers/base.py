@@ -10,22 +10,56 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 class Role(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
+    # The result of a tool the model asked for. Its content is what the model
+    # reads next; `tool_call_id` is what ties it to the request.
+    TOOL = "tool"
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCall:
+    """A tool the model asked to run.
+
+    `arguments` stays a raw JSON string, exactly as the model produced it.
+    Parsing belongs to whoever knows the tool's schema, and a malformed call has
+    to survive long enough to be reported rather than blowing up in transit.
+    """
+
+    id: str
+    name: str
+    arguments: str
 
 
 @dataclass(frozen=True, slots=True)
 class ChatMessage:
     role: Role
     content: str
+    # Set on an assistant message that asked for tools, and on the tool
+    # messages answering it. Both default to empty, so every existing
+    # contributor keeps building plain messages and needs no change.
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_call_id: str | None = None
 
-    def to_wire(self) -> dict[str, str]:
-        return {"role": str(self.role), "content": self.content}
+    def to_wire(self) -> dict[str, Any]:
+        wire: dict[str, Any] = {"role": str(self.role), "content": self.content}
+        if self.tool_calls:
+            wire["tool_calls"] = [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.name, "arguments": call.arguments},
+                }
+                for call in self.tool_calls
+            ]
+        if self.tool_call_id is not None:
+            wire["tool_call_id"] = self.tool_call_id
+        return wire
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +69,13 @@ class ChatRequest:
     temperature: float = 0.7
     max_tokens: int = 2048
     stream: bool = True
+    # Ready-for-the-wire schemas. The provider stays ignorant of what a tool
+    # is; `tools/base.py` knows how to describe one.
+    tools: tuple[dict[str, Any], ...] = ()
+    # "auto", "none", "required", or a specific function. Passed through
+    # untouched — every provider spells the exotic values differently and
+    # guessing for them is worse than letting the caller decide.
+    tool_choice: str | dict[str, Any] | None = None
 
 
 class UsageSource(StrEnum):
@@ -65,6 +106,7 @@ class FinishReason(StrEnum):
     LENGTH = "length"
     STOPPED = "stopped"  # cancelled by the user
     ERROR = "error"
+    TOOL_CALLS = "tool_calls"  # the model wants a tool run before it answers
 
 
 # --- Stream events ------------------------------------------------------
@@ -85,7 +127,19 @@ class FinishEvent:
     reason: FinishReason
 
 
-StreamEvent = TokenEvent | UsageEvent | FinishEvent
+@dataclass(frozen=True, slots=True)
+class ToolCallsEvent:
+    """Every tool the model asked for, once the stream has finished asking.
+
+    Emitted whole rather than as deltas: arguments arrive a few characters at a
+    time and are useless until complete, and a caller that had to reassemble
+    them would be doing the provider's job.
+    """
+
+    calls: tuple[ToolCall, ...]
+
+
+StreamEvent = TokenEvent | UsageEvent | FinishEvent | ToolCallsEvent
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +147,7 @@ class Completion:
     text: str
     usage: Usage
     finish_reason: FinishReason = FinishReason.STOP
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +156,9 @@ class ProviderInfo:
     model: str
     base_url: str
     supports_usage_in_stream: bool = True
+    # Set False the first time a provider rejects a `tools` payload, so the turn
+    # falls back to choosing a tool itself rather than losing search entirely.
+    supports_tools: bool = True
 
 
 class ProviderError(RuntimeError):
@@ -161,7 +219,7 @@ class TokenBudget:
     history: int
 
 
-def messages_to_wire(messages: Sequence[ChatMessage]) -> list[dict[str, str]]:
+def messages_to_wire(messages: Sequence[ChatMessage]) -> list[dict[str, Any]]:
     return [m.to_wire() for m in messages]
 
 

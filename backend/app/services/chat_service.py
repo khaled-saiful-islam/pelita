@@ -19,11 +19,12 @@ block migrations for as long as someone is reading an answer.
 
 from __future__ import annotations
 
+import json
 import logging
 from asyncio import Event
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import perf_counter
 from uuid import UUID
 
@@ -35,6 +36,7 @@ from app.context.base import (
     StoredMessage,
     TurnContext,
 )
+from app.context.contributors import format_results, images_already_shown
 from app.context.pipeline import build_messages
 from app.core.errors import NotFoundError, ValidationError
 from app.core.tokens import count_message_tokens, count_tokens
@@ -51,6 +53,8 @@ from app.providers.base import (
     Role,
     TokenBudget,
     TokenEvent,
+    ToolCall,
+    ToolCallsEvent,
     ToolResult,
     Usage,
     UsageSource,
@@ -76,7 +80,7 @@ from app.services.language_service import detect_language
 from app.services.memory_service import MemoryService
 from app.services.search_intent import SearchDecision, decide
 from app.services.suggestion_service import suggest
-from app.tools.base import Tool, ToolUnavailable
+from app.tools.base import Tool, ToolUnavailable, first_argument, tool_schema
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +114,8 @@ class TurnSettings:
     memory_max_per_user: int = 100
     document_max_bytes: int = 5 * 1024 * 1024
     document_max_per_conversation: int = 3
+    tool_calling_enabled: bool = True
+    tool_max_iterations: int = 3
 
 
 @dataclass(slots=True)
@@ -130,14 +136,69 @@ class TurnState:
     usage: Usage | None = None
     finish: FinishReason = FinishReason.STOP
     error: str | None = None
+    # The tools this turn offered the model, if any. Empty means the turn chose
+    # for itself — the fallback when tool calling is off or unsupported.
+    offered: dict[str, Tool] = field(default_factory=dict)
+    # Search mode "always" means always, so the model is told it must call
+    # something rather than invited to consider it.
+    force_tool: bool = False
+    # Assistant tool-call requests and their results, appended after the built
+    # prompt. This is the conversation the model is having with the tools, and
+    # it has to be replayed on every iteration or the model loses what it asked.
+    exchange: list[ChatMessage] = field(default_factory=list)
 
     @property
     def answer(self) -> str:
         return "".join(self.chunks)
 
+    def add_usage(self, usage: Usage) -> None:
+        """Sum, never replace: a turn that called two tools paid for three
+        model calls, and reporting only the last one prices it as a third of
+        what it cost.
+
+        Mixing a measured count with an estimated one degrades the whole turn to
+        estimated, for the same reason `usage_source` exists at all.
+        """
+        if self.usage is None:
+            self.usage = usage
+            return
+        self.usage = Usage(
+            prompt_tokens=self.usage.prompt_tokens + usage.prompt_tokens,
+            completion_tokens=self.usage.completion_tokens + usage.completion_tokens,
+            source=self.usage.source
+            if self.usage.source == usage.source
+            else UsageSource.ESTIMATED,
+        )
+
+    def absorb(self, results: tuple[ToolResult, ...]) -> tuple[ToolResult, ...]:
+        """Add results to the turn, renumbered to follow what is already there.
+
+        Two searches in one turn both come back numbered from 1, and duplicate
+        citation markers make `[2]` mean two different pages in one answer.
+        """
+        start = len(self.tool_results)
+        renumbered = tuple(
+            replace(result, rank=start + offset) for offset, result in enumerate(results, 1)
+        )
+        self.tool_results = (*self.tool_results, *renumbered)
+        return renumbered
+
     @property
     def citations(self) -> tuple[ToolResult, ...]:
         return (*self.tool_results, *self.image_results)
+
+
+def _parse_arguments(raw: str) -> dict[str, object] | None:
+    """The model's arguments, or None when they are not a JSON object.
+
+    Returning None rather than raising: a malformed call is something the model
+    can be told about and retry, not a failed turn.
+    """
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def derive_title(text: str) -> str:
@@ -257,9 +318,22 @@ class ChatService:
     async def _prepare(
         self, state: TurnState, search_mode: str, *, has_documents: bool
     ) -> AsyncIterator[ChatEvent]:
-        """Guards, then whichever tool the turn calls for."""
+        """Guards, then tools — but only the ones the model cannot ask for.
+
+        When the model can choose, this phase deliberately runs nothing: the
+        choice belongs inside `_generate`, where the answer and the tool calls
+        are the same conversation.
+        """
         for verdict in self._scan(state.question, ContentSource.USER_INPUT):
             yield guard_payload(verdict)
+
+        if search_mode == "off":
+            return
+
+        state.offered = self._tools_to_offer()
+        if state.offered:
+            state.force_tool = search_mode == "always"
+            return
 
         decision = await self._should_search(
             search_mode, state.question, has_documents=has_documents
@@ -268,32 +342,63 @@ class ChatService:
         if tool is None:
             return
 
-        async for event in self._run_tool(tool, state, decision):
+        async for event in self._run_tool(
+            tool, state, query=state.question, detail=decision.reason
+        ):
             yield event
 
-    def _select_tool(self, decision: SearchDecision) -> Tool | None:
-        """The only place a tool is chosen.
+    def _tools_to_offer(self) -> dict[str, Tool]:
+        """The tools this turn hands the model, or nothing.
 
-        Replace this with a model doing the choosing and everything around it
-        still works, which is the whole reason tools have a protocol.
+        Nothing means the turn falls back to `_select_tool` — which keeps search
+        working on a provider that cannot do function calling, instead of
+        quietly losing it.
+        """
+        if not self._tools or not self._settings.tool_calling_enabled:
+            return {}
+        if not self._provider.info.supports_tools:
+            return {}
+        # Re-keyed by the tool's own name, which is what the schema advertises
+        # and therefore what the model calls back with. The registry's key is
+        # usually the same string, but dispatch must not depend on that.
+        return {tool.name: tool for tool in self._tools.values()}
+
+    def _select_tool(self, decision: SearchDecision) -> Tool | None:
+        """Choosing a tool from the question, for providers that cannot choose.
+
+        Kept as the fallback rather than deleted: a local Ollama build with no
+        function calling should still search, and a template that only works
+        against the big providers is not much of a template.
         """
         if not decision.needs_search:
             return None
         return self._tools.get("image_search" if decision.wants_images else "web_search")
 
     async def _run_tool(
-        self, tool: Tool, state: TurnState, decision: SearchDecision
+        self,
+        tool: Tool,
+        state: TurnState,
+        *,
+        query: str,
+        detail: str,
+        sink: list[str] | None = None,
     ) -> AsyncIterator[ChatEvent]:
+        """Run one tool, reporting it, and record what it found.
+
+        `sink`, when given, receives the text the model should read next. That
+        is how a model-requested call gets its answer: the same results the UI
+        renders, worded for a tool message.
+        """
         yield ToolEvent(
             tool=tool.name,
             status="running",
             label=tool.presentation.running,
-            detail=decision.reason,
+            detail=detail,
         )
 
         started = perf_counter()
         try:
-            found = tuple(await tool.run(query=state.question))
+            found = tuple(await tool.run(query=query))
         except ToolUnavailable as exc:
             # A failed tool degrades the answer; it does not end the turn. The
             # model answers from what it knows and the UI says what was missed.
@@ -301,6 +406,8 @@ class ChatService:
             yield ToolEvent(
                 tool=tool.name, status="failed", label="Search unavailable", detail=str(exc)
             )
+            if sink is not None:
+                sink.append(f"The {tool.name} tool is unavailable: {exc}")
             return
 
         yield ToolEvent(
@@ -311,17 +418,28 @@ class ChatService:
         )
 
         if any(result.is_image for result in found):
-            state.image_results = found
+            state.image_results = (*state.image_results, *found)
             yield ImagesEvent(images=found)
+            if sink is not None:
+                sink.append(images_already_shown(found))
             return
 
         # Retrieved pages are the realistic injection vector: nobody asked that
         # page for instructions. Scanned before any contributor sees them.
-        state.tool_results, verdicts = self._scan_results(found)
+        scanned, verdicts = self._scan_results(found)
         for verdict in verdicts:
             yield guard_payload(verdict)
-        if state.tool_results:
-            yield SourcesEvent(sources=state.tool_results)
+        added = state.absorb(scanned)
+        if added:
+            yield SourcesEvent(sources=added)
+        if sink is not None:
+            sink.append(
+                format_results(
+                    added, model=self._provider.info.model, budget=self._settings.budget.tools
+                )
+                if added
+                else "The search returned no usable results."
+            )
 
     # -- phase 3: generate -----------------------------------------------
 
@@ -333,7 +451,49 @@ class ChatService:
         cancel: Event,
         documents: tuple[AttachedDocument, ...],
     ) -> AsyncIterator[ChatEvent]:
+        """Stream the answer, running whatever tools the model asks for first.
+
+        One loop, not a special case: without tool calling `remaining` starts at
+        zero, nothing is offered, and this is a single streamed pass — exactly
+        what it was before.
+        """
         memories = await self._memories_for(user_id)
+        remaining = self._settings.tool_max_iterations if state.offered else 0
+
+        while True:
+            # Offered only while there is budget to act on an answer. On the
+            # last pass the model gets no tools, so it has to reply with words.
+            offered = state.offered if remaining > 0 else {}
+            state.prompt = await self._assemble(state, start, user_id, memories, documents)
+
+            calls: list[ToolCall] = []
+            async for event in self._stream_once(state, offered, cancel, calls):
+                yield event
+
+            if cancel.is_set() or not calls:
+                return
+
+            async for event in self._dispatch(state, offered, tuple(calls)):
+                yield event
+            # Forced once. Leaving it on would make the model call again
+            # forever instead of answering from what it just got.
+            state.force_tool = False
+            remaining -= 1
+
+    async def _assemble(
+        self,
+        state: TurnState,
+        start: StartEvent,
+        user_id: UUID,
+        memories: tuple[str, ...],
+        documents: tuple[AttachedDocument, ...],
+    ) -> tuple[ChatMessage, ...]:
+        """Build the prompt, then append the tool conversation so far.
+
+        `tool_results` is withheld from the context when the model is choosing:
+        the results are already in the exchange as tool messages, which is where
+        the protocol puts them, and passing both would send every page twice.
+        """
         turn = TurnContext(
             conversation_id=start.conversation_id,
             user_id=user_id,
@@ -342,29 +502,111 @@ class ChatService:
             history=state.history,
             budget=self._settings.budget,
             language=state.language,
-            tool_results=state.citations,
+            tool_results=() if state.offered else state.citations,
             documents=documents,
         )
-        state.prompt, trace = await build_messages(turn, self._build_contributors(memories))
+        built, trace = await build_messages(turn, self._build_contributors(memories))
         logger.info("prompt assembled for %s: %s", start.assistant_message_id, trace.as_dict())
+        return (*built, *state.exchange)
 
+    async def _stream_once(
+        self,
+        state: TurnState,
+        offered: dict[str, Tool],
+        cancel: Event,
+        calls: list[ToolCall],
+    ) -> AsyncIterator[ChatEvent]:
+        """One streamed model call. Collects any tool requests into `calls`."""
         request = ChatRequest(
             messages=state.prompt,
             model=self._provider.info.model,
             temperature=self._settings.temperature,
             max_tokens=self._settings.max_tokens,
             stream=True,
+            tools=tuple(tool_schema(tool) for tool in offered.values()),
+            tool_choice=("required" if state.force_tool else "auto") if offered else None,
         )
 
         async for event in self._provider.stream_chat(request):
             if cancel.is_set():
                 state.finish = FinishReason.STOPPED
-                break
+                return
             if isinstance(event, TokenEvent):
                 state.chunks.append(event.text)
                 yield DeltaEvent(text=event.text)
             elif isinstance(event, ProviderUsageEvent):
-                state.usage = event.usage
+                state.add_usage(event.usage)
+            elif isinstance(event, ToolCallsEvent) and offered:
+                calls.extend(event.calls)
+            elif isinstance(event, ToolCallsEvent):
+                # Asked for a tool that was not on the table. Ignored rather
+                # than run, because honouring it would make the iteration cap
+                # advisory — a provider that always calls something could loop
+                # for as long as it liked.
+                logger.info("ignoring %d tool call(s) offered no tools", len(event.calls))
+
+    async def _dispatch(
+        self, state: TurnState, offered: dict[str, Tool], calls: tuple[ToolCall, ...]
+    ) -> AsyncIterator[ChatEvent]:
+        """Run the tools the model asked for and record the exchange.
+
+        Every branch appends a tool message, including the failures. A
+        `tool_calls` request with an unanswered id is a protocol error at the
+        next request, so "I could not do that" has to be said in the exchange
+        rather than only in the log.
+        """
+        state.exchange.append(ChatMessage(role=Role.ASSISTANT, content="", tool_calls=calls))
+
+        for call in calls:
+            tool = offered.get(call.name)
+            if tool is None:
+                logger.info("model asked for unknown tool %r", call.name)
+                yield ToolEvent(
+                    tool=call.name,
+                    status="failed",
+                    label="Unknown tool",
+                    detail=f"{call.name} is not available",
+                )
+                self._answer_call(state, call, f"There is no tool named {call.name}.")
+                continue
+
+            arguments = _parse_arguments(call.arguments)
+            if arguments is None:
+                yield ToolEvent(
+                    tool=tool.name,
+                    status="failed",
+                    label="Could not read the request",
+                    detail="the arguments were not valid JSON",
+                )
+                self._answer_call(
+                    state, call, "Those arguments were not valid JSON. Try again."
+                )
+                continue
+
+            query = first_argument(tool, arguments)
+            if not query:
+                yield ToolEvent(
+                    tool=tool.name,
+                    status="failed",
+                    label="Nothing to look up",
+                    detail="no usable argument",
+                )
+                self._answer_call(state, call, "No usable argument was given.")
+                continue
+
+            sink: list[str] = []
+            # `detail` is what the model chose to look up, which tells the user
+            # more than a regex's reason ever did.
+            async for event in self._run_tool(
+                tool, state, query=query, detail=query, sink=sink
+            ):
+                yield event
+            self._answer_call(state, call, "\n\n".join(sink))
+
+    def _answer_call(self, state: TurnState, call: ToolCall, content: str) -> None:
+        state.exchange.append(
+            ChatMessage(role=Role.TOOL, content=content or "No result.", tool_call_id=call.id)
+        )
 
     # -- phase 4: close --------------------------------------------------
 

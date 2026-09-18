@@ -52,6 +52,40 @@ class Tool(Protocol):
     async def run(self, **kwargs: Any) -> Sequence[ToolResult]: ...
 
 
+def tool_schema(tool: Tool) -> dict[str, Any]:
+    """The OpenAI function-calling description of a tool.
+
+    Built from the protocol's own fields, so a tool becomes model-callable by
+    existing. There is no registry of schemas to keep in step.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        },
+    }
+
+
+def first_argument(tool: Tool, arguments: dict[str, Any]) -> str:
+    """The value of the tool's first declared parameter, whatever it is called.
+
+    Models sometimes return the right value under a plausible wrong key —
+    `q` for `query` is the common one. Falling back to position means a
+    near-miss runs instead of failing, and the tool's own schema is what
+    defines "first".
+    """
+    declared = list((tool.parameters.get("properties") or {}).keys())
+    for name in declared:
+        if isinstance(arguments.get(name), str) and arguments[name].strip():
+            return arguments[name].strip()
+    for value in arguments.values():
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def text_parameter(name: str, description: str) -> dict[str, Any]:
     """The common case: one required string argument."""
     return {
