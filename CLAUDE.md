@@ -99,7 +99,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 87% backend, across 596 backend and 44 frontend tests.
+Target 80%. Currently 88% backend, across 632 backend and 44 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -293,6 +293,13 @@ Be honest about these rather than discovering them:
   check the caller must remember. Keep it that way in new repositories.
 - **Rate limits are counted in Postgres**, not in memory, so they hold across
   workers. Chat and uploads per user, auth per address.
+- **Admin routes take `AdminUser`**, a dependency — never an `if user.is_admin`
+  inside a handler. The route where that gets forgotten is never a harmless one.
+- **An admin cannot disable or demote themselves, or the last active admin.**
+  A single-admin install is the normal case here, and there is no way back in.
+- **Token quotas are summed from `messages`, over a rolling 24 hours**, not from
+  a counter — so they stay true when a conversation is deleted. Checked before
+  the turn; a turn already running is never cut off part-way.
 - **`X-Forwarded-For`: read the LAST hop, never the first.** nginx appends the
   real peer to whatever the client sent, so the first entry is attacker-supplied
   and trusting it makes any per-address limit decorative.

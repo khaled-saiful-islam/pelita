@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response, status
 
-from app.api.deps import AuthServiceDep, CurrentUser, SettingsDep, limit_auth
+from app.api.deps import AuthServiceDep, CurrentUser, SessionDep, SettingsDep, limit_auth
+from app.api.schemas.admin import UsageResponse
 from app.api.schemas.auth import (
     ChangePasswordRequest,
     SignInRequest,
@@ -19,6 +20,7 @@ from app.api.schemas.auth import (
 )
 from app.core.config import Settings
 from app.core.security import create_access_token
+from app.services.quota import TokenQuota
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -73,6 +75,21 @@ async def sign_in(
 @router.post("/signout", status_code=status.HTTP_204_NO_CONTENT)
 async def sign_out(response: Response) -> None:
     response.delete_cookie(COOKIE_NAME, path="/")
+
+
+@router.get("/me/usage", response_model=UsageResponse)
+async def my_usage(user: CurrentUser, session: SessionDep) -> UsageResponse:
+    """What this account has spent and what it may spend.
+
+    Its own endpoint rather than a field on /me, because it costs a query and
+    every page load asks who you are.
+    """
+    usage = await TokenQuota(session).usage(user.id, user.daily_token_limit)
+    return UsageResponse(
+        tokens_used_24h=usage.tokens,
+        daily_token_limit=usage.limit,
+        remaining=usage.remaining,
+    )
 
 
 @router.get("/me", response_model=UserResponse)

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.context.registry import build_contributors
 from app.core.config import Settings, get_settings
-from app.core.errors import AuthError
+from app.core.errors import AuthError, ForbiddenError
 from app.core.security import decode_access_token
 from app.db.models.user import User
 from app.db.repositories.users import SqlUserRepository
@@ -26,6 +26,7 @@ from app.services.accounting_service import Pricing
 from app.services.auth_service import AuthService
 from app.services.cancellation import registry as cancellation_registry
 from app.services.chat_service import ChatService, TurnSettings
+from app.services.quota import TokenQuota
 from app.services.rate_limit import Limit, RateLimiter
 from app.tools.registry import build_tools
 
@@ -78,6 +79,20 @@ async def current_user(
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+
+
+async def current_admin(user: CurrentUser) -> User:
+    """A dependency rather than a check inside each handler.
+
+    A check you have to remember is a check someone forgets on the one route
+    that matters.
+    """
+    if not user.is_admin:
+        raise ForbiddenError("This needs an administrator account.")
+    return user
+
+
+AdminUser = Annotated[User, Depends(current_admin)]
 
 
 def get_chat_service(settings: SettingsDep) -> ChatService:
@@ -139,10 +154,16 @@ def client_address(request: Request, settings: Settings) -> str:
 
 
 async def limit_chat(session: SessionDep, settings: SettingsDep, user: CurrentUser) -> None:
-    """The expensive one: every request here can become several model calls."""
+    """The expensive one: every request here can become several model calls.
+
+    Two different controls, in order of cost to evaluate: how often this account
+    may ask, then how much it may spend. Both run before the turn, so a refusal
+    costs a query rather than a model call.
+    """
     await RateLimiter(session, enabled=settings.rate_limit_enabled).check(
         "chat", str(user.id), Limit(settings.rate_limit_chat_per_minute)
     )
+    await TokenQuota(session).check(user.id, user.daily_token_limit)
 
 
 async def limit_upload(session: SessionDep, settings: SettingsDep, user: CurrentUser) -> None:

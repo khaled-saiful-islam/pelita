@@ -189,11 +189,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         })
 
         if (!response.ok || !response.body) {
-          throw new Error(
-            response.status === 401
-              ? 'Your session expired. Sign in again.'
-              : `The server refused the request (${response.status}).`,
-          )
+          throw new Error(await refusalMessage(response))
         }
 
         for await (const frame of readSse(response.body, controller.signal)) {
@@ -391,6 +387,24 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     load,
     reset,
   }
+}
+
+/**
+ * Why the server would not start the turn.
+ *
+ * The body carries the actual reason — which allowance ran out, how much was
+ * used — and "the server refused the request (429)" throws all of that away at
+ * exactly the moment someone needs it.
+ */
+async function refusalMessage(response: Response): Promise<string> {
+  if (response.status === 401) return 'Your session expired. Sign in again.'
+  try {
+    const body = (await response.json()) as { error?: { message?: string } }
+    if (body?.error?.message) return body.error.message
+  } catch {
+    // Not our envelope — a proxy error page, say.
+  }
+  return `The server refused the request (${response.status}).`
 }
 
 function newMessage(id: string, role: 'user' | 'assistant', content: string): ChatMessage {

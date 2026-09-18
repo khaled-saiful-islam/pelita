@@ -57,6 +57,7 @@ default.
 | **Prompt-injection guard** | Scans your input *and* text from search and news before it reaches the prompt, with a banner naming what it found |
 | **Accounts** | Sign-up, sign-in, profile, JWT in an httpOnly cookie |
 | **Rate limiting** | Per-user caps on chat and uploads, per-address on sign-in. Counted in Postgres, so it survives more than one worker |
+| **User management** | Admins create, disable and promote accounts, and cap what each one may spend per 24 hours. Unlimited by default |
 | **Export** | Any conversation as Markdown |
 | **Theme** | Light, dark, or follow the system |
 
@@ -139,7 +140,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-596 backend tests and 44 frontend tests, 87% backend coverage. The
+632 backend tests and 44 frontend tests, 88% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.

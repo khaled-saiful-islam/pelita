@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from '@/lib/auth'
 import { ThemeProvider } from '@/lib/theme'
 import Chat from '@/pages/Chat'
 import Profile from '@/pages/Profile'
+import Admin from '@/pages/Admin'
 import Settings from '@/pages/Settings'
 import SignIn from '@/pages/SignIn'
 
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/c/:conversationId" element={<Protected><Chat /></Protected>} />
           <Route path="/profile" element={<Protected><Profile /></Protected>} />
           <Route path="/settings" element={<Protected><Settings /></Protected>} />
+          <Route path="/admin" element={<Protected><Admin /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

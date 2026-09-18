@@ -1,6 +1,16 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Check, LogOut, MoreHorizontal, PenSquare, Settings, Trash2, User, X } from 'lucide-react'
+import {
+  Check,
+  LogOut,
+  MoreHorizontal,
+  PenSquare,
+  Settings,
+  Trash2,
+  User,
+  UserCog,
+  X,
+} from 'lucide-react'
 import { useEffect } from 'react'
 import { Button, Spinner } from '@/components/ui'
 import { cn } from '@/lib/utils'
@@ -155,6 +165,15 @@ export function Sidebar({
               <span className="truncate">{user?.display_name ?? user?.username}</span>
             </Button>
           </Link>
+          {/* Only for admins — the route is guarded on the server too, so
+              this is about not offering a door that will not open. */}
+          {user?.is_admin && (
+            <Link to="/admin">
+              <Button variant="ghost" size="icon" aria-label="Users">
+                <UserCog className="size-4" aria-hidden />
+              </Button>
+            </Link>
+          )}
           <Link to="/settings">
             <Button variant="ghost" size="icon" aria-label="Settings">
               <Settings className="size-4" aria-hidden />
