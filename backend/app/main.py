@@ -13,7 +13,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import admin, auth, chat, conversations, documents, health, memories, news
+from app.api.routes import (
+    admin,
+    auth,
+    chat,
+    conversations,
+    documents,
+    health,
+    memories,
+    news,
+    shares,
+)
 from app.core.config import deployment_warnings, get_settings
 from app.core.errors import PelitaError, RateLimitError
 from app.core.logging import configure_logging
@@ -97,6 +107,8 @@ def create_app() -> FastAPI:
     app.include_router(documents.router, prefix="/api")
     app.include_router(memories.router, prefix="/api")
     app.include_router(news.router, prefix="/api")
+    app.include_router(shares.owner_router, prefix="/api")
+    app.include_router(shares.public_router, prefix="/api")
     return app
 
 

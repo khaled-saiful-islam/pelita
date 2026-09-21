@@ -99,7 +99,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 88% backend, across 632 backend and 44 frontend tests.
+Target 80%. Currently 88% backend, across 666 backend and 44 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -125,6 +125,10 @@ before claiming a feature works:
   browser then shows behaviour you already fixed. `make lint` type-checks the
   app; `npm run build` also type-checks the tests, so a bad test file fails the
   deploy and not the lint.
+- **nginx must forward `Host $http_host`, not `$host`.** `$host` drops the
+  port, so any URL the API builds from the request came out as
+  `http://localhost/…` and did not resolve. `PUBLIC_BASE_URL` is the real fix
+  for a deployment; the header is client-controlled.
 - **`index.html` must never be cached.** It names the hashed bundles, so a
   cached copy pins the whole app to an old deploy while the new one sits there
   being served to nobody.
@@ -300,6 +304,13 @@ Be honest about these rather than discovering them:
 - **Token quotas are summed from `messages`, over a rolling 24 hours**, not from
   a counter — so they stay true when a conversation is deleted. Checked before
   the turn; a turn already running is never cut off part-way.
+- **A shared conversation is a frozen copy, and its fields are an allow-list.**
+  `_public_message()` names what a stranger may see; anything unnamed — including
+  a column added later — is absent by construction. A deny-list fails silently
+  the first time the schema grows. There is a test asserting the exact key set.
+- **The public share endpoint is the only unauthenticated route returning
+  content.** It carries `noindex` and `no-store`, has its own rate-limit bucket,
+  and answers a revoked token exactly as it answers one that never existed.
 - **`X-Forwarded-For`: read the LAST hop, never the first.** nginx appends the
   real peer to whatever the client sent, so the first entry is attacker-supplied
   and trusting it makes any per-address limit decorative.

@@ -172,6 +172,17 @@ async def limit_upload(session: SessionDep, settings: SettingsDep, user: Current
     )
 
 
+async def limit_share(request: Request, session: SessionDep, settings: SettingsDep) -> None:
+    """Per address, because nobody is signed in — this is the open endpoint.
+
+    Its own bucket rather than sharing `auth`: a popular shared link should not
+    be able to lock its readers out of signing in.
+    """
+    await RateLimiter(session, enabled=settings.rate_limit_enabled).check(
+        "share", client_address(request, settings), Limit(settings.rate_limit_share_per_minute)
+    )
+
+
 async def limit_auth(request: Request, session: SessionDep, settings: SettingsDep) -> None:
     """Per address, because these are the endpoints reached before anyone is
     signed in — and the ones worth guessing passwords at."""

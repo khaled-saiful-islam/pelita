@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Download, Menu } from 'lucide-react'
+import { Download, Link2, Menu } from 'lucide-react'
 import { Alert, Button } from '@/components/ui'
 import { Logo } from '@/components/Logo'
 import { Composer } from '@/components/chat/Composer'
@@ -10,6 +10,7 @@ import { ConversationUsage } from '@/components/chat/Usage'
 import { NewsStrip } from '@/components/news/NewsStrip'
 import { AttachmentError } from '@/components/chat/AttachmentError'
 import { Suggestions } from '@/components/chat/Suggestions'
+import { ShareDialog } from '@/components/chat/ShareDialog'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
 import { useConfig } from '@/hooks/useConfig'
@@ -39,6 +40,7 @@ export default function Chat() {
 
   const activeConversationId = chat.conversationId ?? routeId ?? null
   const documents = useDocuments(activeConversationId, { images: config?.images_enabled ?? false })
+  const [sharing, setSharing] = useState(false)
 
   useEffect(() => {
     setLoadError(null)
@@ -122,6 +124,17 @@ export default function Chat() {
             <div className="flex shrink-0 items-center gap-3">
               {chat.totals && <ConversationUsage totals={chat.totals} />}
             {activeConversationId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSharing(true)}
+                title="Share a public link"
+              >
+                <Link2 className="size-4" aria-hidden />
+                <span className="hidden sm:inline">Share</span>
+              </Button>
+            )}
+            {activeConversationId && (
               // A plain link, not fetch-and-blob: the browser already knows how
               // to save a file the server marked as an attachment.
               <a
@@ -195,6 +208,14 @@ export default function Chat() {
           autoFocus
         />
       </main>
+
+      {sharing && activeConversationId && (
+        <ShareDialog
+          conversationId={activeConversationId}
+          messageCount={chat.messages.length}
+          onClose={() => setSharing(false)}
+        />
+      )}
     </div>
   )
 }

@@ -58,6 +58,7 @@ default.
 | **Accounts** | Sign-up, sign-in, profile, JWT in an httpOnly cookie |
 | **Rate limiting** | Per-user caps on chat and uploads, per-address on sign-in. Counted in Postgres, so it survives more than one worker |
 | **User management** | Admins create, disable and promote accounts, and cap what each one may spend per 24 hours. Unlimited by default |
+| **Share links** | A public, read-only link to a conversation. A frozen copy, so later messages stay private; revocable, and never indexed |
 | **Export** | Any conversation as Markdown |
 | **Theme** | Light, dark, or follow the system |
 
@@ -88,6 +89,7 @@ is the only prerequisite.
 | `VISION_MODEL` | *(empty)* | Enables image upload. `gpt-4o-mini`, `llama-3.2-11b-vision-preview`, `llava`. Defaults to the `LLM_` URL and key |
 | `TOOL_MAX_ITERATIONS` | `3` | Rounds of tool calls per turn — the cost ceiling, since each is another model call |
 | `RATE_LIMIT_CHAT_PER_MINUTE` | `20` | Messages per user. `TRUST_PROXY_HEADERS=false` if you expose the API without nginx |
+| `PUBLIC_BASE_URL` | *(empty)* | **Set this to deploy.** Where share links point; empty builds them from the request |
 | `SUPPORTED_LANGUAGES` | `en,ms,ta,zh,bn` | Languages to detect between |
 | `MEMORY_AUTO_EXTRACT` | `true` | `false` removes one model call per turn |
 | `SUGGESTIONS_ENABLED` | `true` | `false` removes one model call per turn |
@@ -140,7 +142,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-632 backend tests and 44 frontend tests, 88% backend coverage. The
+666 backend tests and 44 frontend tests, 88% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.

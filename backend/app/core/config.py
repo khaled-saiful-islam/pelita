@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     document_max_bytes: int = 5 * 1024 * 1024
     document_max_per_conversation: int = 3
 
+    # ---- Sharing ----------------------------------------------------------
+    # Where a shared link points. Behind a proxy the request's own host is
+    # whatever the proxy forwarded, and a link built from it can point somewhere
+    # nobody else can reach. Empty falls back to the request, which is right for
+    # a local clone and wrong for a deployment.
+    public_base_url: str = ""
+
     # ---- Rate limiting ----------------------------------------------------
     # Per minute. 0 disables an individual limit; rate_limit_enabled=false
     # disables all of them. Chat and upload are counted per user, auth per
@@ -96,6 +103,10 @@ class Settings(BaseSettings):
     rate_limit_chat_per_minute: int = 20
     rate_limit_upload_per_minute: int = 10
     rate_limit_auth_per_minute: int = 10
+    # The only unauthenticated endpoint that returns content. Counted per
+    # address, and generous — a shared link doing the rounds in a group chat is
+    # a burst of real readers, not an attack.
+    rate_limit_share_per_minute: int = 60
     # nginx appends the real peer to any X-Forwarded-For the client sent, so the
     # LAST entry is the trustworthy one. Set false when the API is exposed
     # directly: then the header is entirely client-controlled and believing it
