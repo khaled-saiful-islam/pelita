@@ -19,6 +19,12 @@ you   Design a wide banner for a badminton tournament at Dewan
       └─────────────────────────────────────────────────┘
 ```
 
+![A poster designed from a one-line brief](../images/pelita-poster.png)
+
+![A deck, each slide on one of the grounds its design chose](../images/pelita-slides.png)
+
+![The build in progress: steps, timings and the palette it chose](../images/pelita-building.png)
+
 An artifact is **one self-contained HTML document**. That is the whole format,
 and it is why this feature adds no service, no build step and no dependency. A
 poster is one canvas; a deck is one `<section>` per slide in the same file.
@@ -69,6 +75,29 @@ one badly.
 | **outline** | what the talk argues, and what each slide does for it |
 | **design** | one stylesheet the whole deck shares: palette, two faces, a layout per slide type |
 | **write** | one call per slide, three at a time |
+
+#### The grounds a deck moves between
+
+A deck where every slide is the same colour reads as one long slide. So the
+design names two to four **grounds** — classes of its own invention, after
+the subject — and the pipeline puts one on each slide.
+
+The names are the design's, not the code's. A deck about highland coffee
+chose `canopy`, `mist`, `terracotta` and `harvest`; one about Brutalism in KL
+chose `concrete`, `ochre`, `terracotta` and `ink`. Nothing in the repository
+contains either list.
+
+What the code decides is only the rhythm: the slides meant to land — title,
+closing, statement, quote — take the emphatic ground, the rest share the
+others, and a run of three identical slides is broken up, because a title,
+three `points` and a closing would otherwise be three of one colour in the
+middle.
+
+The class is applied after the slide is written rather than asked for in the
+prompt. A deck whose grounds alternate only when the writer remembered is a
+deck of one ground — and a writer handed the stylesheet will pick a ground of
+its own, so the ones it was not given are stripped. A ground the stylesheet
+names but never defines does not count; the design is asked again.
 
 The outline is where a deck is won or lost, so that prompt is the longest one
 in the feature. Each slide names its layout from a fixed set — title, agenda,
@@ -259,12 +288,16 @@ documented failure of every implementation that has tried it.
   costs roughly twice a poster. Ten slides is about two minutes.
 - **Speaker notes are in the file but nothing shows them yet.** They are
   `display: none`, waiting for a present mode.
-- **A build is 40–90 seconds**, roughly half of it refinement.
+- **A poster build is 40–90 seconds when nothing needs fixing**, but a
+  poster that fails its own check is corrected and refined, and observed
+  builds have reached 270. Roughly half of any build is refinement.
 - **A content edit costs a composing call.** Only words are free.
 - **Print fidelity is the browser's.** No bleed, no crop marks, no CMYK. A
   document that prints well, not a press-ready file.
-- **The preview is not progressive.** The first look at the poster is the
-  finished one; only the source streams.
+- **A poster's preview is not progressive.** The first look at it is the
+  finished one. While it builds, the panel shows the steps, their timings and
+  the palette the design settled on — never the markup being written, which
+  is not a preview of anything. A deck does show its slides as they land.
 - **The fit measurement lands a few seconds after the poster does.** It waits
   for fonts, so a poster that does not fit is shown before it is flagged.
 - **The design prompt is English-only**, in line with the other pattern layers.
@@ -273,6 +306,12 @@ documented failure of every implementation that has tried it.
   event loop.
 - **The fit check runs in the browser, not at build time.** A poster that fails
   it is shown with a warning rather than automatically redrawn.
+- **A deck's slides are not fit-checked at all.** The poster's checks are
+  structural and run on its markup; nothing measures a rendered slide. A
+  title slide measured 235px of overflow past its own bottom edge, clipped
+  silently by `overflow: hidden`, while the other five slides in the same
+  deck were clean. Catching this needs a headless pass over the built deck,
+  which is not written.
 
 ## Tests
 

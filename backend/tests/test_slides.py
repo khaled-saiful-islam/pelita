@@ -8,7 +8,15 @@ from app.artifacts.base import Brief
 from app.artifacts.deck import Deck, document, one_slide, replace_sections, sections_of
 from app.artifacts.imagery import Photo, attach_photos
 from app.artifacts.slide_prompts import DEFAULT_SLIDES, MAX_SLIDES, MIN_SLIDES
-from app.artifacts.slides import _photo_variables, _photos_in_use, wanted_slides
+from app.artifacts.slides import (
+    _enough_grounds,
+    _grounds,
+    _named_grounds,
+    _photo_variables,
+    _photos_in_use,
+    _section_of,
+    wanted_slides,
+)
 
 DECK = Deck(title="Kopi", css=".slide--title{color:red}", width=1600, height=900,
             fonts=("Lora", "Work Sans"))
@@ -405,3 +413,112 @@ def test_dropping_an_unused_picture_does_not_rename_the_others() -> None:
     assert '--photo-2: url("data:image/jpeg;base64,B")' in attach_photos(
         "<style>:root{}</style>", in_use
     )
+
+
+# --- the ground each slide sits on --------------------------------------
+
+# Names a design invented for a subject, not a vocabulary this module owns.
+REEF = ("slide--abyss", "slide--shallows", "slide--sand")
+
+
+def test_the_moments_meant_to_land_get_the_emphatic_ground() -> None:
+    assert _grounds(["title", "points", "closing"], REEF) == [
+        "slide--abyss",
+        "slide--shallows",
+        "slide--abyss",
+    ]
+
+
+def test_a_run_of_three_the_same_is_broken_up() -> None:
+    """A five-slide deck is usually a title, three `points` and a closing,
+    which by layout alone is three identical slides in the middle."""
+    got = _grounds(["title", "points", "points", "points", "closing"], REEF)
+
+    assert got[0] == got[4] == "slide--abyss"
+    assert got[1] != got[2] or got[2] != got[3]
+
+
+def test_a_deck_is_never_one_colour_end_to_end() -> None:
+    for layouts in (["points"] * 6, ["title", "points", "points", "closing"]):
+        assert len(set(_grounds(layouts, REEF))) > 1, layouts
+
+
+def test_the_names_are_the_designs_own() -> None:
+    """A deck about deep-sea vents and a deck about a bakery should not be
+    reaching into the same box of tones."""
+    bakery = ("slide--crust", "slide--flour")
+    assert set(_grounds(["title", "points"], bakery)) <= set(bakery)
+
+
+def test_a_design_that_named_no_grounds_leaves_the_slides_bare() -> None:
+    assert _grounds(["title", "points"], ()) == ["", ""]
+
+
+def test_a_ground_the_stylesheet_never_defines_does_not_count() -> None:
+    """A name with no rule behind it puts a class on a slide that does
+    nothing, which is the flat deck this exists to prevent."""
+    css = ".slide--abyss { background: #04121e; }"
+    assert _named_grounds("slide--abyss, slide--shallows", css) == ("slide--abyss",)
+
+
+def test_grounds_are_read_however_they_were_written() -> None:
+    css = ".slide--abyss{}.slide--sand{}"
+    assert _named_grounds(".slide--abyss; .slide--sand", css) == (
+        "slide--abyss",
+        "slide--sand",
+    )
+
+
+def test_a_design_that_moves_between_one_ground_is_not_enough() -> None:
+    from app.artifacts.slides import Look
+
+    assert not _enough_grounds(Look(grounds=("slide--abyss",)))
+    assert _enough_grounds(Look(grounds=("slide--abyss", "slide--sand")))
+
+
+def test_the_ground_is_put_on_the_slide_not_asked_for() -> None:
+    """A deck whose grounds alternate only when the writer remembered is a
+    deck of one ground."""
+    written = '<section class="slide slide--points"><h2>Hi</h2></section>'
+    out = _section_of(written, "points", "slide--abyss")
+
+    assert "slide--abyss" in out and "slide--points" in out
+
+
+def test_a_writer_that_guessed_a_ground_does_not_get_two() -> None:
+    written = '<section class="slide slide--title slide--sand"><h1>Hi</h1></section>'
+    out = _section_of(written, "title", "slide--abyss", REEF)
+
+    assert "slide--sand" not in out
+    assert "slide--abyss" in out
+    assert "slide--title" in out
+
+
+def test_a_slide_with_no_class_at_all_still_gets_its_ground() -> None:
+    assert 'class="slide slide--sand"' in _section_of(
+        "<section><h2>Hi</h2></section>", "points", "slide--sand"
+    )
+
+
+def test_a_slide_wears_one_ground_not_two() -> None:
+    """The writer is given the stylesheet, sees the grounds in it, and picks
+    one of its own. A real deck came out with `ground--canopy ground--mist`
+    on the same slide."""
+    written = '<section class="slide slide--points ground--mist"><h2>Hi</h2></section>'
+    out = _section_of(written, "points", "ground--canopy", ("ground--canopy", "ground--mist"))
+
+    assert "ground--mist" not in out
+    assert out.count("ground--canopy") == 1
+
+
+def test_an_added_slide_finds_the_grounds_the_deck_already_uses() -> None:
+    """The design ran in an earlier turn, so the deck itself is the only
+    record of what its grounds are called."""
+    from app.artifacts.slides import _grounds_in
+
+    html = (
+        '<section class="slide slide--title ground--canopy"></section>'
+        '<section class="slide slide--points ground--mist"></section>'
+        '<section class="slide slide--closing ground--canopy"></section>'
+    )
+    assert _grounds_in(html) == ["ground--canopy"]

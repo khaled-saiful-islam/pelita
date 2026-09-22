@@ -55,7 +55,9 @@ from app.artifacts.slide_prompts import (
     DECK_CHANGE_SYSTEM,
     DEFAULT_SLIDES,
     DESIGN_SYSTEM,
+    MAX_GROUNDS,
     MAX_SLIDES,
+    MIN_GROUNDS,
     MIN_SLIDES,
     OUTLINE_SYSTEM,
     SLIDE_SYSTEM,
@@ -82,6 +84,7 @@ class Look:
     body_font: str = "Work Sans"
     why: str = ""
     css: str = ""
+    grounds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +95,7 @@ class Slide:
     content: str
     speaker_notes: str = ""
     image_query: str = ""
+    ground: str = ""
 
 
 def wanted_slides(brief: Brief) -> int:
@@ -155,7 +159,16 @@ class SlidesKind:
         yield Step(label="Planned", detail=outline.get("argument", "")[:90])
 
         yield Step(label="Choosing a look", detail="palette, type and layouts")
-        deck, spec = await self._design(context, outline, count)
+        deck, spec, grounds = await self._design(context, outline, count)
+        # After the design, not before it: the grounds are the design's own
+        # names for this subject, so there is nothing to assign until it has
+        # chosen them.
+        slides = [
+            replace(slide, ground=ground)
+            for slide, ground in zip(
+                slides, _grounds([s.layout for s in slides], grounds), strict=True
+            )
+        ]
         yield Designed(
             movement=spec.movement,
             palette=tuple(swatch.hex for swatch in spec.palette),
@@ -172,7 +185,9 @@ class SlidesKind:
         # Filled as they are written; the generator yields what the panel
         # should show and leaves the pieces here.
         sections: dict[int, str] = {}
-        async for update in self._write_slides(deck, slides, variables, count, sections):
+        async for update in self._write_slides(
+            deck, slides, variables, count, sections, grounds
+        ):
             yield update
 
         html = document(deck, [sections[i] for i in sorted(sections)])
@@ -272,6 +287,13 @@ class SlidesKind:
             job=str(answered.get("job") or "").strip()[:200],
             content=str(answered.get("content") or "").strip()[:1500],
             speaker_notes=str(answered.get("speaker_notes") or "").strip()[:600],
+            # A slide added later still belongs to the deck's rhythm, so it
+            # takes the ground its layout would have been given, out of the
+            # ones this deck actually has.
+            ground=_grounds(
+                [str(answered.get("layout") or "points").lower()],
+                _grounds_in(html),
+            )[0],
         )
         section = await self._one_slide(deck, slide, None)
         try:
@@ -337,7 +359,9 @@ class SlidesKind:
         ]
         return answered, [slide for slide in slides if slide.heading]
 
-    async def _design(self, context: str, outline: dict, count: int) -> tuple[Deck, DesignSpec]:
+    async def _design(
+        self, context: str, outline: dict, count: int
+    ) -> tuple[Deck, DesignSpec, tuple[str, ...]]:
         layouts = ", ".join(sorted({str(s.get("layout", "")) for s in outline.get("slides", [])}))
         asked = (
             f"{context}\n\nThe talk argues: {outline.get('argument', '')}\n"
@@ -354,9 +378,14 @@ class SlidesKind:
             async for _ in self._model.write(DESIGN_SYSTEM, asked, written, temperature=0.6):
                 pass
             look = _read_look(written.text)
-            if look.css:
+            if look.css and _enough_grounds(look):
                 break
-            logger.info("no stylesheet on attempt %d", attempt + 1)
+            logger.info(
+                "unusable stylesheet on attempt %d (css=%s, grounds=%d)",
+                attempt + 1,
+                bool(look.css),
+                len(look.grounds),
+            )
         if look is None or not look.css:
             raise ArtifactUnavailable(
                 "The design model could not settle on a look for this deck."
@@ -378,7 +407,7 @@ class SlidesKind:
             height=self.canvas.height,
             fonts=(look.display_font, look.body_font),
         )
-        return deck, spec
+        return deck, spec, look.grounds
 
     async def _photographs(self, slides: Sequence[Slide]) -> dict[int, Photo]:
         """One picture per slide that asked for one, as far as they are found."""
@@ -404,6 +433,7 @@ class SlidesKind:
         variables: dict[int, str],
         count: int,
         sections: dict[int, str],
+        grounds: Sequence[str] = (),
     ) -> AsyncIterator[BuildUpdate]:
         """Every slide, written several at a time and reported in order."""
         next_to_report = 0
@@ -411,7 +441,9 @@ class SlidesKind:
 
         async def write(index: int) -> tuple[int, str]:
             async with limit:
-                return index, await self._one_slide(deck, slides[index], variables.get(index))
+                return index, await self._one_slide(
+                    deck, slides[index], variables.get(index), grounds
+                )
 
         pending = [asyncio.create_task(write(i)) for i in range(len(slides))]
         try:
@@ -437,7 +469,13 @@ class SlidesKind:
             for task in pending:
                 task.cancel()
 
-    async def _one_slide(self, deck: Deck, slide: Slide, variable: str | None) -> str:
+    async def _one_slide(
+        self,
+        deck: Deck,
+        slide: Slide,
+        variable: str | None,
+        grounds: Sequence[str] = (),
+    ) -> str:
         system = "\n".join(
             [
                 SLIDE_SYSTEM,
@@ -453,8 +491,12 @@ class SlidesKind:
                 f"the only one that may use it. Put it on the slide: "
                 f"`background-image: var({variable})` with `background-size: cover` "
                 "and `background-position: center`, on the section itself or on a "
-                "panel within it. Lay a scrim over it and keep every word readable "
-                "against its lightest and darkest parts. This is not optional — the "
+                "panel within it. Then put every word on something solid: a panel, "
+                "a band, or a scrim dense enough that the photograph is dark where "
+                "light type sits and light where dark type sits. Never set a muted "
+                "or secondary colour straight over a photograph — a subtitle in the "
+                "palette's quiet tone over a dark photograph is invisible, and that "
+                "is the way this goes wrong. This is not optional — the "
                 "slide was planned around having a picture, and a slide that ignores "
                 f"it ships the photograph's weight and shows nothing. Use "
                 f"`var({variable})` and never an image URL."
@@ -471,7 +513,7 @@ class SlidesKind:
         written = Written()
         async for _ in self._model.write(system, asked, written, temperature=0.5):
             pass
-        return _section_of(written.text, slide.layout)
+        return _section_of(written.text, slide.layout, slide.ground, grounds)
 
     def _check(self, html: str, made: int, wanted: int) -> tuple[Finding, ...]:
         findings: list[Finding] = []
@@ -491,6 +533,96 @@ class SlidesKind:
 
 
 # -- helpers -------------------------------------------------------------
+
+
+# The layouts whose slides are meant to land. They get the emphatic ground —
+# whichever one the design put first — and everything else shares the rest.
+_LANDS = frozenset({"title", "closing", "statement", "quote"})
+
+
+def _grounds(layouts: Sequence[str], grounds: Sequence[str]) -> list[str]:
+    """A ground for every slide, from the ones this deck actually has.
+
+    The names are the design's, not this module's: a deck about deep-sea
+    vents and a deck about a bakery should not be reaching into the same box
+    of tones. All that is decided here is the rhythm — which slides get the
+    emphatic one, and that the rest do not sit in a run of three identical
+    slides, which is what a title, three `points` and a closing would
+    otherwise be.
+    """
+    if not grounds:
+        return ["" for _ in layouts]
+    emphatic, *rest = grounds
+    others = rest or [emphatic]
+
+    chosen: list[str] = []
+    for layout in layouts:
+        if layout in _LANDS:
+            chosen.append(emphatic)
+        else:
+            chosen.append(others[len([c for c in chosen if c in others]) % len(others)])
+
+    for index in range(1, len(chosen) - 1):
+        if chosen[index - 1] == chosen[index] == chosen[index + 1]:
+            alternatives = [g for g in grounds if g != chosen[index]]
+            if alternatives:
+                chosen[index] = alternatives[-1]
+    return chosen
+
+
+_OPEN_SECTION = re.compile(r"<section\b([^>]*)>")
+_CLASS_ATTR = re.compile(r'class\s*=\s*"([^"]*)"')
+
+
+def _wearing(section: str, ground: str, others: Sequence[str] = ()) -> str:
+    """The slide with the ground it was planned for, and no other.
+
+    Put on here rather than asked for in the prompt: a deck whose grounds
+    alternate only when the writer remembered is a deck of one ground.
+    """
+
+    def fix(tag: re.Match[str]) -> str:
+        attributes = tag.group(1)
+        found = _CLASS_ATTR.search(attributes)
+        if found is None:
+            return f'<section class="slide {ground}"{attributes}>'
+        unwanted = {*others, ground}
+        classes = [c for c in found.group(1).split() if c not in unwanted]
+        classes.append(ground)
+        return (
+            f"<section{attributes[: found.start()]}"
+            f'class="{" ".join(classes)}"'
+            f"{attributes[found.end() :]}>"
+        )
+
+    return _OPEN_SECTION.sub(fix, section, count=1)
+
+
+_GROUND_IN_USE = re.compile(r'<section[^>]*class="([^"]*)"')
+
+
+def _grounds_in(html: str) -> list[str]:
+    """The ground classes a finished deck already uses, most-used first.
+
+    A slide added to an existing deck has no `Look` to ask — the design ran
+    in some earlier turn — so the deck itself is the record of what its
+    grounds are called.
+    """
+    seen: dict[str, int] = {}
+    for classes in _GROUND_IN_USE.findall(html):
+        for name in classes.split():
+            if name != "slide":
+                seen[name] = seen.get(name, 0) + 1
+    # The names are the design's own, so there is no prefix to match on. What
+    # separates a ground from a layout class is that a ground is reused: the
+    # deck moves between a few of them, while a layout belongs to its slide.
+    shared = [name for name, count in seen.items() if count > 1]
+    return sorted(shared, key=lambda name: -seen[name])
+
+
+def _enough_grounds(look: Look) -> bool:
+    """Whether this design moves between enough grounds to not read flat."""
+    return len(look.grounds) >= MIN_GROUNDS
 
 
 def _photo_variables(photos: dict[int, Photo]) -> tuple[list[Photo], dict[int, str]]:
@@ -541,15 +673,19 @@ def _context(brief: Brief) -> str:
     return "\n\n".join(parts)
 
 
-def _section_of(text: str, layout: str) -> str:
-    """The `<section>` the model returned, whatever it wrapped it in."""
+def _section_of(
+    text: str, layout: str, ground: str = "", others: Sequence[str] = ()
+) -> str:
+    """The `<section>` the model returned, whatever it wrapped it in, on the
+    ground it was planned for."""
     cleaned = strip_fence(text)
     match = re.search(r"<section\b[\s\S]*</section>", cleaned)
     if match:
-        return match.group(0)
+        return _wearing(match.group(0), ground, others) if ground else match.group(0)
     # No section at all. Wrap what came back rather than dropping the slide;
     # the stylesheet still applies and the words are still there.
-    return f'<section class="slide slide--{layout}">{cleaned}</section>'
+    classes = " ".join(filter(None, ("slide", f"slide--{layout}", ground)))
+    return f'<section class="{classes}">{cleaned}</section>'
 
 
 def _read_look(text: str) -> Look:
@@ -572,7 +708,13 @@ def _read_look(text: str) -> Look:
     fields: dict[str, str] = {}
     for line in head.splitlines():
         name, sep, value = line.partition(":")
-        if sep and name.strip().upper() in {"MOVEMENT", "DISPLAY", "BODY", "WHY"}:
+        if sep and name.strip().upper() in {
+            "MOVEMENT",
+            "DISPLAY",
+            "BODY",
+            "WHY",
+            "GROUNDS",
+        }:
             fields[name.strip().upper()] = value.strip()
 
     return Look(
@@ -581,7 +723,24 @@ def _read_look(text: str) -> Look:
         body_font=fields.get("BODY") or "Work Sans",
         why=fields.get("WHY", "")[:200],
         css=strip_fence(css).strip(),
+        grounds=_named_grounds(fields.get("GROUNDS", ""), css),
     )
+
+
+def _named_grounds(line: str, css: str) -> tuple[str, ...]:
+    """The ground classes the design named, as far as it actually defined them.
+
+    A name with no rule behind it puts a class on a slide that does nothing,
+    which is indistinguishable from the flat deck this exists to prevent — so
+    a ground only counts once the stylesheet has somewhere for it to go.
+    """
+    names = [
+        part.strip().lstrip(".")
+        for part in line.replace(";", ",").split(",")
+        if part.strip()
+    ]
+    defined = [name for name in names if f".{name}" in css]
+    return tuple(dict.fromkeys(defined))[:MAX_GROUNDS]
 
 
 def _stylesheet_of(html: str) -> str:

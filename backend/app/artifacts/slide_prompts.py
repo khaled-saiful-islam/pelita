@@ -18,6 +18,12 @@ DEFAULT_SLIDES = 5
 MIN_SLIDES = 3
 MAX_SLIDES = 24
 
+# How many grounds a deck may move between. The names are the design's own —
+# a deck about kopi and a deck about quarterly churn should not be reaching
+# into the same box of three tones — so only the count is fixed here.
+MIN_GROUNDS = 2
+MAX_GROUNDS = 4
+
 # Enough for a sentence to breathe, few enough that nobody reads the slide
 # instead of listening. Checked, not merely asked for.
 MIN_WORDS = 12
@@ -100,6 +106,14 @@ Write a stylesheet that every slide will share. It must define:
 - Classes for each layout the outline asked for: `.slide--title`,
   `.slide--points` and so on, each doing its job properly rather than all
   looking alike.
+- **Grounds the deck moves between** -- {MIN_GROUNDS} to {MAX_GROUNDS} of
+  them -- because a deck where every slide is the same colour reads as one
+  long slide. Name them yourself, after this subject: a deck about deep-sea
+  vents and a deck about a bakery should not be reaching into the same box
+  of tones. Each is a class of your own naming, sets its own background AND
+  its own ink, and every layout must stay readable on all of them. They are
+  put on the slides for you -- list them on the GROUNDS line below, the one
+  for the moments that should land first.
 - Type scale, `h1` through `p`, a `.eyebrow`, a `.caption`, a `.note`.
 - At least one recurring graphic device -- a rule, a corner mark, a numeral, a
   shape -- that makes the deck look like one deck.
@@ -122,13 +136,14 @@ Hard constraints:
 - Slide numbers via CSS counters, never typed into each slide by hand.
 - Every colour below `:root` refers to a variable. Never repeat a literal hex.
 
-Reply in exactly this shape. Four header lines, then the marker on a line of
+Reply in exactly this shape. Five header lines, then the marker on a line of
 its own, then the stylesheet as plain CSS. No JSON, no code fence, no
 commentary.
 
 MOVEMENT: two words at most
 DISPLAY: a Google Fonts family
 BODY: a Google Fonts family
+GROUNDS: your ground class names, comma separated, emphatic one first
 WHY: one sentence on why this suits the subject
 {CSS_MARKER}
 :root {{ ... }}

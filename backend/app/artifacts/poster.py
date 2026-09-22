@@ -30,6 +30,7 @@ from app.artifacts.base import (
     Built,
     Canvas,
     Chunk,
+    Designed,
     DesignSpec,
     Finished,
     SandboxPolicy,
@@ -128,6 +129,15 @@ class PosterKind:
         # step that has already finished reads as a hang.
         yield Step(label="Choosing a direction", detail="palette, type and shape")
         spec = await self._direct(context)
+        # The look, so the panel can show what is being made in its own colours
+        # while it is still being made. A poster has no pieces to show as they
+        # land, so this is what stands in for a preview.
+        yield Designed(
+            movement=spec.movement,
+            palette=tuple(swatch.hex for swatch in spec.palette),
+            display_font=spec.display_font,
+            body_font=spec.body_font,
+        )
         yield Step(label="Chose a direction", detail=_direction_summary(spec))
 
         photos: list[Photo] = []

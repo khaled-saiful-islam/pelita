@@ -4,18 +4,19 @@ import { readableOn } from '@/lib/contrast'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
 /**
- * A deck being written.
+ * An artifact being made.
  *
- * Three things go up before any slide exists: what the talk is called, what it
- * argues, and what it is going to look like. Then every slide is named, and
- * each card fills with the real thing as it lands.
+ * The look goes up first — it is decided a full minute before anything else
+ * exists — and then, for a deck, every slide as it lands. A poster has no
+ * pieces to show, so the look is all there is, and that is the whole of what
+ * this shows for one: never the source. Watching markup scroll past is not a
+ * preview of anything.
  *
- * Shown in the deck's own palette rather than in grey. A progress display in
- * somebody else's colours is a progress display for something else, and the
- * colours are known a full minute before the slides are.
+ * Shown in the artifact's own palette rather than in grey. A progress display
+ * in somebody else's colours is a progress display for something else.
  */
 
-export function DeckBuilding({ build }: { build: ArtifactBuild }) {
+export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
   const planned = build.plan ?? []
   const made = new Map(build.parts.map((part) => [part.index, part]))
   const total = planned.length || build.parts.length

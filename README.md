@@ -9,6 +9,27 @@ imports `openai`, `anthropic` or anything like them.
 
 ![Pelita — a chat answering from an attached brief](docs/images/pelita-chat.png)
 
+Ask for a poster or a deck and it is designed, not filled into a template —
+its own palette, type and layout, chosen for the subject, in a panel beside
+the conversation.
+
+![A poster for a night market, designed from a one-line brief](docs/images/pelita-poster.png)
+
+![A six-slide deck, each slide on one of the grounds its design chose](docs/images/pelita-slides.png)
+
+Nothing is templated. The two decks below were asked for the same way, and the
+design named its own grounds and picked its own faces for each subject:
+
+| Deck | Grounds it invented | Faces |
+|---|---|---|
+| Highland coffee | canopy · mist · terracotta · harvest | Fraunces + DM Sans |
+| KL Brutalism | concrete · ochre · terracotta · ink | Bricolage Grotesque + DM Sans |
+
+While it works, the panel shows what it is doing and the look it has settled
+on — never the markup being written.
+
+![The build in progress: steps, timings and the palette it chose](docs/images/pelita-building.png)
+
 ## Quick start
 
 ```bash
@@ -59,6 +80,9 @@ default.
 | **Rate limiting** | Per-user caps on chat and uploads, per-address on sign-in. Counted in Postgres, so it survives more than one worker |
 | **User management** | Admins create, disable and promote accounts, and cap what each one may spend per 24 hours. Unlimited by default |
 | **Share links** | A public, read-only link to a conversation. A frozen copy, so later messages stay private; revocable, and never indexed |
+| **Posters** | Ask for one and a poster is designed, not filled into a template — its own palette, type and layout, with photographs found on the web and embedded so the file stands alone. Opens in a panel beside the chat: share, open, download as PNG |
+| **Slide decks** | A deck planned as a talk, then written one slide at a time so the first appears while the last is still being made. Three grounds it moves between, 16:9 enforced, photographs where they earn their place. Download as PDF |
+| **Editing an artifact** | Ask in the chat box and only what you named changes — a colour change touches two lines of a 237 KB document, not the whole design. Fixing a word in place takes no model call and no new version |
 | **Export** | Any conversation as Markdown |
 | **Theme** | Light, dark, or follow the system |
 
@@ -101,9 +125,11 @@ Every setting lives in [`.env.example`](.env.example) with a comment.
 
 Three ideas make this a template rather than an app:
 
-**Everything pluggable is a Protocol with a registry.** Providers, guards and
-search backends are each one file plus one registry line. Nothing else imports a
-concrete implementation.
+**Everything pluggable is a Protocol with a registry.** Providers, guards,
+search backends and artifact kinds are each one file plus one registry line.
+Nothing else imports a concrete implementation — slides shipped as
+`slides.py` plus one line in `artifacts/registry.py`, and the chat turn,
+the tool and the panel did not change to admit a second kind.
 
 **The prompt is built by ordered contributors.** System prompt at 100, memory at
 200, tool results at 300, attached files at 350, history at 400, the user message
@@ -121,7 +147,8 @@ backend/app/
 ├── providers/   base.py (Protocol) + openai_compatible.py + registry.py
 ├── guards/      base.py (Protocol) + prompt_injection.py + registry.py
 ├── context/     the ordered contributor pipeline
-├── tools/       serpapi.py, news_mcp.py
+├── tools/       serpapi.py, news_mcp.py, artifact.py
+├── artifacts/   base.py (Protocol) + poster.py + slides.py + registry.py
 └── db/          models, repositories, session
 frontend/src/styles/theme.css    every colour, in one file
 ```

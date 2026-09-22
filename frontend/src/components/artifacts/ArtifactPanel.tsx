@@ -18,7 +18,7 @@ import { BuildSteps } from '@/components/artifacts/BuildSteps'
 import { ArtifactFrame } from '@/components/artifacts/ArtifactFrame'
 import { DeckFrame } from '@/components/artifacts/DeckFrame'
 import { DeckFilmstrip } from '@/components/artifacts/DeckFilmstrip'
-import { DeckBuilding } from '@/components/artifacts/DeckBuilding'
+import { ArtifactBuilding } from '@/components/artifacts/ArtifactBuilding'
 import { EditableFrame } from '@/components/artifacts/EditableFrame'
 import { ShareArtifactDialog } from '@/components/artifacts/ShareArtifactDialog'
 import { useArtifact } from '@/hooks/useArtifact'
@@ -212,12 +212,10 @@ export function ArtifactPanel({
         {building && (
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto p-5">
             <BuildSteps build={build} />
-            {(build.plan?.length || build.parts.length > 0) && <DeckBuilding build={build} />}
-            {build.source && !build.plan?.length && (
-              <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-background p-3 text-[11px] leading-relaxed text-muted-foreground">
-                <code>{tail(build.source)}</code>
-              </pre>
-            )}
+            {/* The look, the plan and the finished pieces — never the source.
+                Watching markup scroll past is not a preview of anything, and
+                it is the one thing on screen that nobody reading it wants. */}
+            <ArtifactBuilding build={build} />
           </div>
         )}
 
@@ -458,11 +456,4 @@ function Tab({
       {children}
     </button>
   )
-}
-
-/** The last of a document being written. Keeping all of it on screen means the
- *  interesting end is always off the bottom. */
-function tail(source: string, lines = 40): string {
-  const all = source.split('\n')
-  return all.slice(Math.max(0, all.length - lines)).join('\n')
 }
