@@ -126,6 +126,13 @@ class DesignSpec:
     layout: str = ""
     motif: str = ""
     reference: str = ""
+    # The size this artifact chose for itself. Stored rather than taken from
+    # the kind, because a printed flyer and something to post are the same kind
+    # and different shapes, and the panel has to size the frame to whichever
+    # this one is.
+    width: int = 0
+    height: int = 0
+    shape: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -137,6 +144,9 @@ class DesignSpec:
             "layout": self.layout,
             "motif": self.motif,
             "reference": self.reference,
+            "width": self.width,
+            "height": self.height,
+            "shape": self.shape,
         }
 
     @classmethod
@@ -157,7 +167,19 @@ class DesignSpec:
             layout=str(raw.get("layout", "")),
             motif=str(raw.get("motif", "")),
             reference=str(raw.get("reference", "")),
+            width=_as_int(raw.get("width")),
+            height=_as_int(raw.get("height")),
+            shape=str(raw.get("shape", "")),
         )
+
+
+def _as_int(value: Any) -> int:
+    """A dimension the model sent, or zero. Models write "1080px" and "1080"
+    with equal confidence."""
+    try:
+        return int(float(str(value).strip().removesuffix("px")))
+    except (TypeError, ValueError):
+        return 0
 
 
 @dataclass(frozen=True, slots=True)
