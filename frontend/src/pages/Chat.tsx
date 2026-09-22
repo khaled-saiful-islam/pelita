@@ -209,6 +209,7 @@ export default function Chat() {
           onStop={chat.stop}
           streaming={chat.streaming}
           searchEnabled={config?.search_enabled ?? false}
+          makeable={config?.makeable ?? []}
           imagesEnabled={config?.images_enabled ?? false}
           files={documents.pending}
           uploadingFile={documents.uploading}

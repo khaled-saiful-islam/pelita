@@ -62,6 +62,9 @@ export interface PublicConfig {
   images_enabled: boolean
   currency: string
   supported_languages: string[]
+  /** What this deployment can make. Straight from the registry, so a kind
+   *  added there appears in the UI without a list to edit. */
+  makeable?: { name: string; label: string; description: string }[]
 }
 
 export const getConfig = () => apiFetch<PublicConfig>('/config')

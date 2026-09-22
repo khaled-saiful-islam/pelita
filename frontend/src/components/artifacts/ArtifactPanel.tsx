@@ -187,7 +187,7 @@ export function ArtifactPanel({
               <Button variant="ghost" size="sm" onClick={() => setSharing(true)} title="Share a link">
                 <Link2 className="size-4" aria-hidden />
               </Button>
-              <DownloadMenu artifact={artifact} />
+              <DownloadMenu artifact={artifact} deck={deck} />
               <a
                 href={`/api/artifacts/${artifact.id}/raw?version=${artifact.version}`}
                 target="_blank"
@@ -339,8 +339,10 @@ export function ArtifactPanel({
  */
 function DownloadMenu({
   artifact,
+  deck,
 }: {
   artifact: { id: string; version: number }
+  deck: boolean
 }) {
   const [open, setOpen] = useState(false)
   const base = `/api/artifacts/${artifact.id}/download?version=${artifact.version}`
@@ -366,8 +368,12 @@ function DownloadMenu({
               onClick={() => setOpen(false)}
               className="px-3 py-2 text-left text-xs hover:bg-muted"
             >
-              <span className="block font-medium">Picture (PNG)</span>
-              <span className="block text-muted-foreground">To post or send</span>
+              <span className="block font-medium">
+                {deck ? 'Slides (PDF)' : 'Picture (PNG)'}
+              </span>
+              <span className="block text-muted-foreground">
+                {deck ? 'One slide a page, to present or send' : 'To post or send'}
+              </span>
             </a>
             <a
               href={`${base}&format=html`}

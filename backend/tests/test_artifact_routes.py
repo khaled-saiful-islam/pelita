@@ -427,6 +427,33 @@ async def test_a_download_is_a_picture_by_default(api, artifact, monkeypatch) ->
     assert response.content.startswith(b"\x89PNG")
 
 
+async def test_a_deck_downloads_as_a_pdf(api, session, db_user, conversation, monkeypatch) -> None:
+    """A poster goes on a noticeboard; a deck gets presented from and emailed."""
+    import app.api.routes.artifacts as routes
+
+    async def fake_pdf(html: str, *, width: int, height: int) -> bytes:
+        assert (width, height) == (1600, 900)
+        return b"%PDF-1.4 fake"
+
+    monkeypatch.setattr(routes, "to_pdf", fake_pdf)
+    deck = await SqlArtifactRepository(session).create(
+        conversation_id=conversation.id,
+        user_id=db_user.id,
+        message_id=None,
+        kind="slides",
+        title="Kopi",
+        html=DOCUMENT,
+        design_spec={"width": 1600, "height": 900},
+    )
+
+    async with api as client:
+        await sign_in(client)
+        response = await client.get(f"/api/artifacts/{deck.id}/download")
+
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == 'attachment; filename="Kopi.pdf"'
+
+
 async def test_no_renderer_is_a_message_not_a_crash(api, artifact, monkeypatch) -> None:
     import app.api.routes.artifacts as routes
     from app.artifacts.raster import RasterUnavailable

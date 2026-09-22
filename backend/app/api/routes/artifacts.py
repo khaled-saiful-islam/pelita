@@ -24,7 +24,7 @@ from app.api.schemas.artifact import (
     ReviseRequest,
 )
 from app.artifacts.base import ArtifactUnavailable, DesignSpec, Finished
-from app.artifacts.raster import RasterUnavailable, to_png
+from app.artifacts.raster import RasterUnavailable, to_pdf, to_png
 from app.artifacts.registry import build_kinds
 from app.artifacts.text_edit import apply_text, readable_text
 from app.core.errors import NotFoundError, ValidationError
@@ -297,17 +297,23 @@ async def download(
     user: CurrentUser,
     settings: SettingsDep,
     version: int | None = None,
-    format: str = "png",
+    format: str = "auto",
 ) -> Response:
-    """The poster as a file.
+    """The artifact as a file.
 
-    A picture by default, because that is what a poster is for: it goes into a
-    message, a feed or a noticeboard, and none of those take an HTML file. The
-    document is still available with `format=html`, and is what to keep if you
-    ever want to edit it again.
+    A picture for a poster and a PDF for a deck, because that is what each one
+    is for: a poster goes into a message or onto a noticeboard, and a deck gets
+    presented from and emailed around. The document is still available with
+    `format=html`, and is what to keep if you ever want to edit it again.
     """
     artifact, chosen = await _load(session, artifact_id, user.id, version)
     name = _filename(artifact.title)
+    spec = chosen.design_spec or {}
+    width = int(spec.get("width") or 794)
+    height = int(spec.get("height") or 1123)
+
+    if format == "auto":
+        format = "pdf" if artifact.kind == "slides" else "png"
 
     if format == "html" or not settings.artifact_export_png:
         return Response(
@@ -319,22 +325,28 @@ async def download(
             },
         )
 
-    spec = chosen.design_spec or {}
     try:
-        picture = await to_png(
-            chosen.html,
-            width=int(spec.get("width") or 794),
-            height=int(spec.get("height") or 1123),
-        )
+        if format == "pdf":
+            rendered, kind, suffix = (
+                await to_pdf(chosen.html, width=width, height=height),
+                "application/pdf",
+                "pdf",
+            )
+        else:
+            rendered, kind, suffix = (
+                await to_png(chosen.html, width=width, height=height),
+                "image/png",
+                "png",
+            )
     except RasterUnavailable as exc:
         raise ValidationError(str(exc)) from exc
 
     return Response(
-        content=picture,
-        media_type="image/png",
+        content=rendered,
+        media_type=kind,
         headers={
             **PUBLIC_HEADERS,
-            "Content-Disposition": f'attachment; filename="{name}.png"',
+            "Content-Disposition": f'attachment; filename="{name}.{suffix}"',
         },
     )
 

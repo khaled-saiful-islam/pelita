@@ -75,6 +75,34 @@ async def shutdown() -> None:
         _playwright = None
 
 
+async def to_pdf(html: str, *, width: int, height: int) -> bytes:
+    """A deck as a PDF, one slide to a page.
+
+    The document already carries the print rules that do this — a page the size
+    of a slide and a break after each one — so the browser only has to be asked
+    politely. `print_background` because a deck without its colours is not the
+    deck.
+    """
+    browser = await _ensure_browser()
+    context = await browser.new_context(
+        viewport={"width": max(width, 1), "height": max(height, 1)},
+        java_script_enabled=False,
+    )
+    page = await context.new_page()
+    try:
+        await page.set_content(html, wait_until="load", timeout=LOAD_TIMEOUT_MS)
+        await page.wait_for_timeout(FONT_SETTLE_MS)
+        return await page.pdf(
+            width=f"{width}px",
+            height=f"{height}px",
+            print_background=True,
+            margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
+            prefer_css_page_size=True,
+        )
+    finally:
+        await context.close()
+
+
 async def to_png(html: str, *, width: int, height: int, scale: int = 2) -> bytes:
     """The poster as a picture, at its own size.
 

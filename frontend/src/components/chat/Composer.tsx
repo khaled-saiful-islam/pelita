@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import type { SearchMode } from '@/hooks/useChat'
 import { acceptAttribute, type AttachedFile } from '@/hooks/useDocuments'
 import { Attachments } from './Attachments'
+import { CreateMenu, type Makeable } from './CreateMenu'
 
 const MAX_HEIGHT_PX = 224 // matches --composer-max-height in theme.css
 const SEARCH_MODE_KEY = 'pelita-search-mode'
@@ -32,6 +33,7 @@ export function Composer({
   streaming,
   disabled,
   searchEnabled,
+  makeable = [],
   imagesEnabled = false,
   files,
   uploadingFile,
@@ -47,6 +49,8 @@ export function Composer({
   disabled?: boolean
   /** False when SERPAPI_KEY is unset; the toggle is shown but not usable. */
   searchEnabled: boolean
+  /** What can be made. Empty when no artifact model is configured. */
+  makeable?: Makeable[]
   /** Whether the picker offers images, which needs a vision model. */
   imagesEnabled?: boolean
   files: AttachedFile[]
@@ -181,6 +185,16 @@ export function Composer({
             <Paperclip className="size-3.5" aria-hidden />
             Attach
           </button>
+
+          <CreateMenu
+            makeable={makeable}
+            onPick={(opening) => {
+              // Written into the box rather than arming a hidden mode: the
+              // person then says what they want and can see what will be sent.
+              setValue((current) => (current.trim() ? current : opening))
+              textarea.current?.focus()
+            }}
+          />
 
           <button
             type="button"
