@@ -11,6 +11,7 @@ import { NewsStrip } from '@/components/news/NewsStrip'
 import { AttachmentError } from '@/components/chat/AttachmentError'
 import { Suggestions } from '@/components/chat/Suggestions'
 import { ShareDialog } from '@/components/chat/ShareDialog'
+import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
 import { useConfig } from '@/hooks/useConfig'
@@ -88,6 +89,10 @@ export default function Chat() {
   }
 
   const empty = chat.messages.length === 0
+  // The build on the answer being written, so the panel can show it before
+  // there is an artifact to show.
+  const building = chat.messages[chat.messages.length - 1]?.building ?? null
+  const panelOpen = !!chat.openArtifact || !!building
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -162,6 +167,8 @@ export default function Chat() {
             currency={chat.currency}
             onRate={chat.rate}
             onRegenerate={chat.regenerate}
+            openArtifact={chat.openArtifact}
+            onOpenArtifact={chat.setOpenArtifact}
             footer={
               <Suggestions
                 items={chat.suggestions}
@@ -208,6 +215,14 @@ export default function Chat() {
           autoFocus
         />
       </main>
+
+      {panelOpen && (
+        <ArtifactPanel
+          artifactId={chat.openArtifact}
+          build={building}
+          onClose={() => chat.setOpenArtifact(null)}
+        />
+      )}
 
       {sharing && activeConversationId && (
         <ShareDialog

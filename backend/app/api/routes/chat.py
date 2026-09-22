@@ -138,7 +138,10 @@ def _to_sse(event: object) -> dict[str, str] | None:
                 "event": "artifact.done",
                 "data": json.dumps(
                     {
-                        "artifact_id": str(event.artifact_id),
+                        # `id`, the same key the REST shape uses. Two names
+                        # for one thing is how a card ends up pointing at
+                        # `undefined` and the panel silently refuses to open.
+                        "id": str(event.artifact_id),
                         "kind": event.kind,
                         "title": event.title,
                         "version": event.version,

@@ -200,6 +200,24 @@ async def test_the_finished_artifact_is_stored_and_located(
     assert stored.versions[0].design_spec["movement"] == "Midnight Brass"
 
 
+async def test_the_finished_frame_names_the_artifact_the_same_way_rest_does(
+    session, db_user, registry
+) -> None:
+    """Two names for one id is how a card ends up pointing at `undefined` and
+    the panel silently refuses to open. Found in a browser, not here."""
+    from app.api.routes.chat import _to_sse
+
+    _, service = asking_for_a_poster(session, registry, FakePoster())
+    events = await turn(service, db_user)
+    done = next(e for e in events if isinstance(e, ArtifactDoneEvent))
+
+    frame = _to_sse(done)
+    assert frame is not None
+    payload = json.loads(frame["data"])
+    assert payload["id"] == str(done.artifact_id)
+    assert "artifact_id" not in payload
+
+
 async def test_the_artifact_belongs_to_the_answer_that_made_it(
     session, db_user, registry
 ) -> None:

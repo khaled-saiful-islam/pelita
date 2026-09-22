@@ -9,6 +9,7 @@ import { ToolActivityList } from './ToolActivity'
 import { GuardBanner } from './GuardBanner'
 import { ImageGrid } from './ImageGrid'
 import { MessageAttachments } from './Attachments'
+import { ArtifactCard } from '@/components/artifacts/ArtifactCard'
 import { cn } from '@/lib/utils'
 import type { ChatMessage, Rating } from '@/hooks/useChat'
 
@@ -18,6 +19,8 @@ export function MessageList({
   currency,
   onRate,
   onRegenerate,
+  openArtifact,
+  onOpenArtifact,
   footer,
 }: {
   messages: ChatMessage[]
@@ -25,6 +28,8 @@ export function MessageList({
   currency: string
   onRate: (messageId: string, rating: Rating | null, reason?: string) => void
   onRegenerate: (messageId: string) => void
+  openArtifact?: string | null
+  onOpenArtifact?: (artifactId: string | null) => void
   /** Rendered after the last message — follow-up chips live here. */
   footer?: React.ReactNode
 }) {
@@ -65,6 +70,8 @@ export function MessageList({
               canRegenerate={index === messages.length - 1 && message.role === 'assistant'}
               onRate={onRate}
               onRegenerate={onRegenerate}
+              openArtifact={openArtifact}
+              onOpenArtifact={onOpenArtifact}
             />
           ))}
         </div>
@@ -82,6 +89,8 @@ function MessageRow({
   canRegenerate,
   onRate,
   onRegenerate,
+  openArtifact,
+  onOpenArtifact,
 }: {
   message: ChatMessage
   rating: Rating | null
@@ -89,6 +98,8 @@ function MessageRow({
   canRegenerate: boolean
   onRate: (messageId: string, rating: Rating | null, reason?: string) => void
   onRegenerate: (messageId: string) => void
+  openArtifact?: string | null
+  onOpenArtifact?: (artifactId: string | null) => void
 }) {
   if (message.role === 'user') {
     return (
@@ -122,6 +133,19 @@ function MessageRow({
       {message.images && message.images.length > 0 && (
         <ImageGrid images={message.images} />
       )}
+
+      {message.building && (
+        <ArtifactCard build={message.building} onOpen={() => onOpenArtifact?.(null)} />
+      )}
+
+      {message.artifacts?.map((artifact) => (
+        <ArtifactCard
+          key={artifact.id}
+          artifact={artifact}
+          active={openArtifact === artifact.id}
+          onOpen={() => onOpenArtifact?.(artifact.id)}
+        />
+      ))}
 
       {waiting ? (
         <Working />

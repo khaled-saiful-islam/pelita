@@ -12,6 +12,8 @@ import { readSse } from '@/lib/sse'
 import { addUsage, dispatchFrame, mergeSources, mergeTool } from '@/lib/chat-events'
 import { splitStoredSources } from '@/lib/messages'
 import type {
+  Artifact,
+  ArtifactBuild,
   AttachedFile,
   ChatMessage,
   ConversationDetail,
@@ -27,6 +29,8 @@ import type {
 
 // Re-exported so components keep importing conversation types from one place.
 export type {
+  Artifact,
+  ArtifactBuild,
   AttachedFile,
   ChatMessage,
   ConversationDetail,
@@ -65,6 +69,9 @@ export interface UseChat {
   stop: () => void
   load: (conversationId: string) => Promise<void>
   reset: () => void
+  /** The artifact the panel is showing, or null for none. */
+  openArtifact: string | null
+  setOpenArtifact: (artifactId: string | null) => void
 }
 
 export function useChat(onConversationStarted?: (id: string, title: string) => void): UseChat {
@@ -77,6 +84,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   const [language, setLanguage] = useState<string | null>(null)
   const [totals, setTotals] = useState<Totals | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [openArtifact, setOpenArtifact] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
@@ -97,11 +105,29 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     [patch],
   )
 
+  /** Change the build on the answer being written. Separate from `patchActive`
+   *  because every update is a function of what is already there — steps
+   *  append, the document grows — and a plain patch would drop whatever
+   *  arrived between the read and the write. */
+  const patchBuild = useCallback(
+    (change: (build: ArtifactBuild) => ArtifactBuild) => {
+      const id = assistantIdRef.current
+      if (!id) return
+      setMessages((current) =>
+        current.map((m) =>
+          m.id === id && m.building ? { ...m, building: change(m.building) } : m,
+        ),
+      )
+    },
+    [],
+  )
+
   const reset = useCallback(() => {
     abortRef.current?.abort()
     abortRef.current = null
     assistantIdRef.current = null
     setMessages([])
+    setOpenArtifact(null)
     setConversationId(null)
     setTitle(null)
     setStreaming(false)
@@ -131,6 +157,24 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     // Chips are per-turn and not persisted.
     setSuggestions([])
     setStreaming(false)
+    setOpenArtifact(null)
+
+    // Artifacts live in their own table, so a reload has to put the cards back.
+    // Wrapped because a conversation that loads without them is missing a card;
+    // a conversation that fails to load is missing everything.
+    try {
+      const made = await apiFetch<{ items: Artifact[] }>(`/conversations/${id}/artifacts`)
+      if (made.items.length) {
+        setMessages((current) =>
+          current.map((m) => {
+            const mine = made.items.filter((a) => a.message_id === m.id)
+            return mine.length ? { ...m, artifacts: mine } : m
+          }),
+        )
+      }
+    } catch {
+      // No cards rather than no conversation.
+    }
   }, [])
 
   /**
@@ -254,6 +298,36 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               // Rolled in rather than refetched: the server already said what
               // this turn cost.
               setTotals((current) => addUsage(current, usage))
+            },
+            onArtifactStart: (start) => {
+              setOpenArtifact(null)
+              patchActive({
+                building: { ...start, steps: [], source: '', failed: null },
+              })
+            },
+            onArtifactStep: (step) => {
+              patchBuild((build) => ({ ...build, steps: [...build.steps, step] }))
+            },
+            onArtifactDelta: (text) => {
+              patchBuild((build) => ({ ...build, source: build.source + text }))
+            },
+            onArtifactDone: (artifact) => {
+              const id = assistantIdRef.current
+              if (id) {
+                setMessages((current) =>
+                  current.map((m) =>
+                    m.id === id
+                      ? { ...m, building: null, artifacts: [...(m.artifacts ?? []), artifact] }
+                      : m,
+                  ),
+                )
+              }
+              // Opened as soon as it exists. The panel measures it before it
+              // shows anything, so this is not a promise that it is good.
+              setOpenArtifact(artifact.id)
+            },
+            onArtifactFailed: (failure) => {
+              patchBuild((build) => ({ ...build, failed: failure.message }))
             },
             onSuggestions: setSuggestions,
             onError: (message) => {
@@ -386,6 +460,8 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     stop,
     load,
     reset,
+    openArtifact,
+    setOpenArtifact,
   }
 }
 

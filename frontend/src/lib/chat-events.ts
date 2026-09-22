@@ -9,6 +9,7 @@
 
 import type { SseMessage } from './sse'
 import type {
+  Artifact,
   GuardAlert,
   ImageResult,
   Source,
@@ -25,6 +26,11 @@ export interface StreamHandlers {
   onSources: (sources: Source[]) => void
   onToken: (text: string) => void
   onUsage: (usage: UsagePayload) => void
+  onArtifactStart: (start: { kind: string; title: string }) => void
+  onArtifactStep: (step: { label: string; detail: string }) => void
+  onArtifactDelta: (text: string) => void
+  onArtifactDone: (artifact: Artifact & { findings: string[] }) => void
+  onArtifactFailed: (failure: { message: string; retryable: boolean }) => void
   onSuggestions: (items: string[]) => void
   onError: (message: string) => void
   onDone: (finishReason: string) => void
@@ -51,6 +57,24 @@ export function dispatchFrame(frame: SseMessage, handlers: StreamHandlers): void
       return handlers.onToken(String(payload.text ?? ''))
     case 'usage':
       return handlers.onUsage(payload as unknown as UsagePayload)
+    case 'artifact.start':
+      return handlers.onArtifactStart(
+        payload as unknown as { kind: string; title: string },
+      )
+    case 'artifact.step':
+      return handlers.onArtifactStep(
+        payload as unknown as { label: string; detail: string },
+      )
+    case 'artifact.delta':
+      return handlers.onArtifactDelta(String(payload.text ?? ''))
+    case 'artifact.done':
+      return handlers.onArtifactDone(
+        payload as unknown as Artifact & { findings: string[] },
+      )
+    case 'artifact.failed':
+      return handlers.onArtifactFailed(
+        payload as unknown as { message: string; retryable: boolean },
+      )
     case 'suggestions':
       return handlers.onSuggestions((payload.items ?? []) as string[])
     case 'error':

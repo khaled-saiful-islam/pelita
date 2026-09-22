@@ -44,6 +44,38 @@ export interface ToolActivity {
   detail: string
 }
 
+/** An artifact made during a turn, or loaded back with a conversation. */
+export interface Artifact {
+  id: string
+  /** The answer that made it, so a reload puts the card back in the right
+   *  place. Null when the message it belonged to was deleted. */
+  message_id?: string | null
+  kind: string
+  title: string
+  version: number
+  width: number
+  height: number
+  created_at: string
+}
+
+export interface ArtifactDetail extends Artifact {
+  html: string
+  /** What the frame may do. Empty is the strongest setting there is. */
+  sandbox: string
+  versions: { version: number; size_bytes: number; created_at: string }[]
+}
+
+/** A build in progress. Held separately from the finished artifact because it
+ *  has no id yet and may never get one. */
+export interface ArtifactBuild {
+  kind: string
+  title: string
+  steps: { label: string; detail: string }[]
+  /** The document as it is written. Shown as source; the preview waits. */
+  source: string
+  failed?: string | null
+}
+
 export interface Totals {
   prompt_tokens: number
   completion_tokens: number
@@ -89,6 +121,10 @@ export interface ChatMessage {
   tools?: ToolActivity[]
   /** Guard findings for this turn. */
   guards?: GuardAlert[]
+  /** What this answer made, if anything. */
+  artifacts?: Artifact[]
+  /** The build, while it is happening. */
+  building?: ArtifactBuild | null
   /** Files sent with this message, shown as cards above it. */
   documents?: AttachedFile[]
   /** True only for the message currently being written. */
