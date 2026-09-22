@@ -391,3 +391,48 @@ def test_the_model_is_told_not_to_declare_it() -> None:
     brief = photo_brief([PHOTO])
     assert "Do NOT declare" in brief
     assert "behind everything else" in brief
+
+
+def test_an_invented_url_is_removed_when_there_is_no_picture_for_it() -> None:
+    """A model given no photograph writes one every time. Refusing the whole
+    change over it loses work the person asked for; the poster falls back to
+    the gradient underneath, which is what it would have had anyway.
+
+    From a real failure: the image search timed out, the model wrote an
+    unsplash.com URL, and "add one image in the BG" was thrown away.
+    """
+    from app.artifacts.imagery import drop_invented_images
+
+    document = (
+        '<html><head><link href="https://fonts.googleapis.com/css2?family=Lora">'
+        "<style>.bg{background-image:url('https://images.unsplash.com/photo-150?ixlib=rb')}"
+        "</style></head><body></body></html>"
+    )
+    fixed, dropped = drop_invented_images(document)
+
+    assert dropped == 1
+    assert "unsplash" not in fixed
+    assert "background-image:none" in fixed.replace(" ", "")
+    assert "fonts.googleapis.com" in fixed
+
+
+async def test_the_search_is_tried_twice_before_giving_up(mocked) -> None:
+    """Image search is the slowest thing the provider does and times out often
+    enough that giving up on the first try loses a picture asked for by name."""
+    mocked({"https://pictures.test/a.png": httpx.Response(
+        200, content=a_picture(400, 400), headers=IMAGE_HEADERS
+    )})
+
+    class FlakyOnce(FakeSearch):
+        def __init__(self, urls):
+            super().__init__(urls)
+            self._first = True
+
+        async def search_images(self, query, *, limit):
+            if self._first:
+                self._first = False
+                raise SearchUnavailable("The search provider timed out.")
+            return await super().search_images(query, limit=limit)
+
+    photo = await find_photo(FlakyOnce(["https://pictures.test/a.png"]), "kopi")
+    assert photo is not None

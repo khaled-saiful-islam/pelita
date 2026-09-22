@@ -70,6 +70,7 @@ from app.services.events import (
     AccountingEvent,
     ArtifactDeltaEvent,
     ArtifactDoneEvent,
+    ArtifactFailedEvent,
     ArtifactStartEvent,
     ArtifactStepEvent,
     ChatEvent,
@@ -504,6 +505,11 @@ class ChatService:
             # A failed tool degrades the answer; it does not end the turn. The
             # model answers from what it knows and the UI says what was missed.
             logger.info("tool %s unavailable: %s", tool.name, exc)
+            if making:
+                # The panel is showing a build. Without this it keeps showing
+                # it — a spinner on a step that will never finish, which is how
+                # a failed change reads as a hung one.
+                yield ArtifactFailedEvent(message=str(exc), retryable=True)
             yield ToolEvent(
                 tool=tool.name,
                 status="failed",
@@ -566,7 +572,9 @@ class ChatService:
                     if sink is not None:
                         sink.append(
                             f"The {made.kind} has been changed and the new version is on "
-                            "screen. Say in one line what changed. Do not describe the markup."
+                            "screen. Say in one line what changed. Do not describe the "
+                            "markup."
+                            + _caveats(built.note)
                         )
                     return
 
@@ -603,7 +611,8 @@ class ChatService:
             sink.append(
                 f"The {made.kind} \"{made.title}\" is made and is on screen next to "
                 "the conversation. Tell them briefly what you made and what they "
-                "can change. Do not describe the markup and do not repeat the text on it."
+                "can change. Do not describe the markup and do not repeat the text "
+                "on it." + _caveats(built.note)
             )
 
     def _record(
@@ -1175,6 +1184,17 @@ async def _updates(tool: Tool, arguments: dict[str, Any]) -> AsyncIterator[ToolU
             yield update
         return
     yield Results(items=tuple(await tool.run(**arguments)))
+
+
+def _caveats(note: str) -> str:
+    """What did not go to plan, for the model to pass on.
+
+    Without this it cheerfully reports a sunset photograph that is not there,
+    because from where it sits the change succeeded.
+    """
+    if not note:
+        return ""
+    return f" Tell them this, plainly and in one sentence: {note}"
 
 
 def _needs_open_artifact(tool: Tool) -> bool:

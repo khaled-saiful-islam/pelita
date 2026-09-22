@@ -1,4 +1,4 @@
-import { Image as ImageIcon, Loader2 } from 'lucide-react'
+import { AlertCircle, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Artifact, ArtifactBuild } from '@/lib/chat-types'
 
@@ -19,7 +19,8 @@ export function ArtifactCard({
   active?: boolean
   onOpen: () => void
 }) {
-  const busy = !!build && !artifact
+  const failed = !!build?.failed
+  const busy = !!build && !artifact && !failed
   const title = artifact?.title ?? build?.title ?? 'Artifact'
   const kind = artifact?.kind ?? build?.kind ?? 'artifact'
   const step = build?.steps[build.steps.length - 1]
@@ -33,20 +34,32 @@ export function ArtifactCard({
       className={cn(
         'mb-3 flex w-full max-w-sm items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5 text-left transition-colors',
         !busy && 'hover:border-primary/40',
+        failed && 'border-destructive/40',
         active && 'border-primary/60',
       )}
     >
       <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted">
         {busy ? (
           <Loader2 className="size-4 animate-spin text-primary" aria-hidden />
+        ) : failed ? (
+          <AlertCircle className="size-4 text-destructive" aria-hidden />
         ) : (
           <ImageIcon className="size-4 text-muted-foreground" aria-hidden />
         )}
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{title}</span>
-        <span className="block truncate text-xs text-muted-foreground">
-          {busy ? (step?.label ?? 'Starting') : `${kind}${artifact ? ` · v${artifact.version}` : ''}`}
+        <span
+          className={cn(
+            'block truncate text-xs',
+            failed ? 'text-destructive' : 'text-muted-foreground',
+          )}
+        >
+          {failed
+            ? 'Could not finish — the poster is unchanged'
+            : busy
+              ? (step?.label ?? 'Starting')
+              : `${kind}${artifact ? ` · v${artifact.version}` : ''}`}
         </span>
       </span>
     </button>

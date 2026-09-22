@@ -43,6 +43,7 @@ from app.artifacts.imagery import (
     Photo,
     attach_photos,
     detach_photos,
+    drop_invented_images,
     find_photos,
     photo_brief,
     use_the_real_photograph,
@@ -161,16 +162,13 @@ class PosterKind:
         # photograph is attached only to check the real thing and to finish,
         # because a base64 image costs more tokens than the entire poster and
         # a repair pass that carried one would pay for it twice.
+        notes: list[str] = []
+
         def finished(document: str) -> str:
-            if not photos:
-                return document
-            # A model told a variable holds the picture will still sometimes
-            # write a stock URL of its own. Pointing it at the photograph we
-            # actually have beats refusing the whole poster over it.
-            corrected, swapped = use_the_real_photograph(document)
-            if swapped:
-                logger.info("redirected %d invented image url(s) to the real one", swapped)
-            return attach_photos(corrected, photos)
+            settled, note = self._settle_images(document, photos)
+            if note and note not in notes:
+                notes.append(note)
+            return settled
 
         yield Step(label="Checking it fits")
         findings = self._check(finished(html), spec)
@@ -226,6 +224,7 @@ class PosterKind:
                 # a poster with one imperfection is worth far more to the
                 # person who asked than a refusal.
                 findings=tuple(str(finding) for finding in findings),
+                note=" ".join(notes),
             )
         )
 
@@ -318,11 +317,7 @@ class PosterKind:
             ):
                 yield update
             revised, usage = written.text, written.usage
-        if available:
-            corrected, swapped = use_the_real_photograph(revised)
-            if swapped:
-                logger.info("redirected %d invented image url(s) to the real one", swapped)
-            revised = attach_photos(corrected, available)
+        revised, note = self._settle_images(revised, available)
 
         yield Step(label="Checking it fits")
         findings = self._check(revised, spec)
@@ -343,8 +338,31 @@ class PosterKind:
                 prompt_tokens=usage.prompt_tokens,
                 completion_tokens=usage.completion_tokens,
                 build_ms=int((perf_counter() - started) * 1000),
+                note=note,
             )
         )
+
+    def _settle_images(self, document: str, photos: Sequence[Photo]) -> tuple[str, str]:
+        """Make every picture in the document one that actually exists.
+
+        A model told a variable holds the photograph still sometimes writes a
+        stock URL of its own, and a model given no photograph at all writes one
+        every time. With a picture in hand the URL is pointed at it; without
+        one it is removed, because a poster falling back to its gradient is a
+        poster, and refusing the whole change over a URL the model invented
+        loses work the person asked for.
+        """
+        if photos:
+            corrected, swapped = use_the_real_photograph(document)
+            if swapped:
+                logger.info("redirected %d invented image url(s) to the real one", swapped)
+            return attach_photos(corrected, photos), ""
+
+        corrected, dropped = drop_invented_images(document)
+        if not dropped:
+            return corrected, ""
+        logger.info("dropped %d invented image url(s); none was found", dropped)
+        return corrected, "No picture could be found, so this was done without one."
 
     async def _edit_in_place(
         self,

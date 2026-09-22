@@ -246,7 +246,9 @@ async def test_the_model_is_told_it_exists_but_never_shown_it(
     ]
     assert answered
     assert "on screen" in answered[0].content
-    assert "canvas" not in answered[0].content
+    # Not the document. Replaying thousands of tokens of CSS buys nothing.
+    for markup in ("<div", "<!DOCTYPE", "class=", "<style"):
+        assert markup not in answered[0].content
 
 
 async def test_a_build_that_fails_degrades_the_turn_rather_than_ending_it(

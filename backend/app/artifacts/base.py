@@ -241,7 +241,11 @@ class Built:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     build_ms: int = 0
+    # What the checks still found. Technical, for the panel.
     findings: tuple[str, ...] = field(default_factory=tuple)
+    # One sentence for a person, when something did not go to plan in a way
+    # they would otherwise never learn about.
+    note: str = ""
 
 
 # --- what a build reports while it runs ---------------------------------

@@ -109,10 +109,20 @@ async def find_photo(
     if not query:
         return None
 
-    try:
-        results = await search.search_images(query, limit=CANDIDATES)
-    except SearchUnavailable as exc:
-        logger.info("no photograph for %r: %s", query, exc)
+    results = []
+    # Two goes. Image search is the slowest thing the search provider does and
+    # times out often enough that giving up on the first one loses a picture
+    # somebody asked for by name.
+    for attempt in range(2):
+        try:
+            results = await search.search_images(query, limit=CANDIDATES)
+            break
+        except SearchUnavailable as exc:
+            if attempt:
+                logger.info("no photograph for %r: %s", query, exc)
+                return None
+            logger.info("image search failed for %r, trying once more: %s", query, exc)
+    if not results:
         return None
 
     # Redirects are followed by hand, so each hop can be checked.
@@ -337,6 +347,22 @@ def reattach(document: str, data_uri: str) -> str:
 _STYLE_URL = re.compile(
     r"url\(\s*['\"]?(https?://[^)'\"]+)['\"]?\s*\)", re.IGNORECASE
 )
+
+
+def drop_invented_images(document: str) -> tuple[str, int]:
+    """Remove image URLs when there is no picture to put in their place.
+
+    A model that wanted a photograph and was given none writes one anyway. If
+    we cannot substitute a real picture, the poster is still better off
+    without a broken box in it than refused entirely — the background falls
+    back to whatever gradient is underneath, which is what it would have been.
+    """
+    style_start = document.lower().find("<style")
+    if style_start == -1:
+        return document, 0
+    head, tail = document[:style_start], document[style_start:]
+    swapped, count = _STYLE_URL.subn("none", tail)
+    return head + swapped, count
 
 
 def use_the_real_photograph(document: str) -> tuple[str, int]:
