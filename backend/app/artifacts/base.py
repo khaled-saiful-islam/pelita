@@ -108,6 +108,10 @@ class Brief:
     brief: str
     style_hints: str = ""
     data: str = ""
+    # How many pieces, when the person said. Zero means the kind decides.
+    # Asked for as its own field because a number buried in prose is a number
+    # the chat model paraphrases away.
+    count: int = 0
     # The language the conversation is in, so the poster's own words match it.
     language: str | None = None
 

@@ -73,12 +73,16 @@ class Slide:
 
 
 def wanted_slides(brief: Brief) -> int:
-    """How many slides, from the person's own words.
+    """How many slides, from what the person asked for.
 
-    Asked for in the brief rather than a parameter on the tool: people say "a
-    six slide deck" in the sentence, and a number the chat model has to notice
-    and copy is a number it sometimes does not.
+    The tool has a field for it, and the brief is read as a fallback, because
+    a number said in passing — "make me an 8 slide deck" — is a number the
+    chat model will sometimes paraphrase away while still repeating it back.
+    That happened on the first real run: it announced an eight-slide deck and
+    made ten.
     """
+    if brief.count:
+        return max(MIN_SLIDES, min(MAX_SLIDES, brief.count))
     said = _COUNT.search(f"{brief.brief} {brief.title}")
     if not said:
         return DEFAULT_SLIDES

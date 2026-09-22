@@ -84,6 +84,9 @@ export interface ArtifactBuild {
   /** Pieces finished so far, in order. A deck shows slide one while slide
    *  seven is still being written. */
   parts: ArtifactPart[]
+  /** What is coming, named before it exists, so the shape is on screen from
+   *  the start. */
+  plan?: string[]
   failed?: string | null
 }
 

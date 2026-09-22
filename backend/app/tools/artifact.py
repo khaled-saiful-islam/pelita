@@ -37,6 +37,14 @@ from app.tools.base import (
 logger = logging.getLogger(__name__)
 
 
+def _as_count(value: Any) -> int:
+    """A number the model sent, or nothing. Models write "8" and 8 equally."""
+    try:
+        return max(0, min(99, int(str(value).strip())))
+    except (TypeError, ValueError):
+        return 0
+
+
 class CreateArtifactTool:
     """One tool for every kind. The model picks the kind."""
 
@@ -99,6 +107,14 @@ class CreateArtifactTool:
                         "or rephrased."
                     ),
                 },
+                "count": {
+                    "type": "integer",
+                    "description": (
+                        "How many slides, when the person said a number - "
+                        "'eight slides', 'a 12 page deck'. Copy their number "
+                        "exactly. Leave it out entirely when they did not say."
+                    ),
+                },
             },
             "required": ["kind", "title", "brief"],
         }
@@ -117,6 +133,7 @@ class CreateArtifactTool:
             brief=str(kwargs.get("brief") or "").strip(),
             style_hints=str(kwargs.get("style_hints") or "").strip(),
             data=str(kwargs.get("data") or "").strip(),
+            count=_as_count(kwargs.get("count")),
             language=self._language,
         )
 

@@ -325,6 +325,9 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
             onArtifactDelta: (text) => {
               patchBuild((build) => ({ ...build, source: build.source + text }))
             },
+            onArtifactPlan: (titles) => {
+              patchBuild((build) => ({ ...build, plan: titles }))
+            },
             onArtifactPart: (part) => {
               patchBuild((build) => ({ ...build, parts: mergePart(build.parts, part) }))
             },

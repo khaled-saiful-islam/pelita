@@ -14,6 +14,7 @@ function handlers(): StreamHandlers {
     onArtifactStep: vi.fn(),
     onArtifactDelta: vi.fn(),
     onArtifactPart: vi.fn(),
+    onArtifactPlan: vi.fn(),
     onArtifactDone: vi.fn(),
     onArtifactFailed: vi.fn(),
     onSuggestions: vi.fn(),

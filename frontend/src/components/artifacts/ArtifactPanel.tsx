@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Download,
   Image as ImageIcon,
@@ -14,11 +16,15 @@ import {
 import { Alert, Button } from '@/components/ui'
 import { BuildSteps } from '@/components/artifacts/BuildSteps'
 import { ArtifactFrame } from '@/components/artifacts/ArtifactFrame'
+import { DeckFrame } from '@/components/artifacts/DeckFrame'
+import { DeckFilmstrip } from '@/components/artifacts/DeckFilmstrip'
+import { DeckBuilding } from '@/components/artifacts/DeckBuilding'
 import { EditableFrame } from '@/components/artifacts/EditableFrame'
 import { ShareArtifactDialog } from '@/components/artifacts/ShareArtifactDialog'
 import { useArtifact } from '@/hooks/useArtifact'
 import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { isDeck, slidesOf } from '@/lib/deck'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
 /**
@@ -55,6 +61,37 @@ export function ArtifactPanel({
 
   const building = !artifactId && !!build
   const title = artifact?.title ?? build?.title ?? 'Artifact'
+
+  const deck = !!artifact && isDeck(artifact.kind, artifact.html)
+  const slides = useMemo(
+    () => (artifact && deck ? slidesOf(artifact.html) : []),
+    [artifact, deck],
+  )
+  const [current, setCurrent] = useState(0)
+
+  // Back to the first slide whenever a different deck, or a different version
+  // of one, arrives — slide nine of the old one is not slide nine of this one.
+  useEffect(() => setCurrent(0), [artifact?.id, artifact?.version])
+
+  useEffect(() => {
+    if (!deck || slides.length < 2 || editing) return
+    const onKey = (event: KeyboardEvent) => {
+      // Not while somebody is typing into the chat box.
+      const typing = document.activeElement
+      if (typing instanceof HTMLTextAreaElement || typing instanceof HTMLInputElement) return
+      if (event.key === 'ArrowRight' || event.key === 'PageDown') {
+        setCurrent((n) => Math.min(n + 1, slides.length - 1))
+      } else if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        setCurrent((n) => Math.max(n - 1, 0))
+      } else if (event.key === 'Home') {
+        setCurrent(0)
+      } else if (event.key === 'End') {
+        setCurrent(slides.length - 1)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [deck, slides.length, editing])
 
   async function saveText() {
     if (!artifact || changes.size === 0) {
@@ -173,9 +210,10 @@ export function ArtifactPanel({
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         {building && (
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-5">
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto p-5">
             <BuildSteps build={build} />
-            {build.source && (
+            {(build.plan?.length || build.parts.length > 0) && <DeckBuilding build={build} />}
+            {build.source && !build.plan?.length && (
               <pre className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-background p-3 text-[11px] leading-relaxed text-muted-foreground">
                 <code>{tail(build.source)}</code>
               </pre>
@@ -213,7 +251,25 @@ export function ArtifactPanel({
                 </span>
               </div>
             )}
-            {editing ? (
+            {deck && !editing ? (
+              <>
+                <DeckFrame
+                  html={artifact.html}
+                  width={artifact.width}
+                  height={artifact.height}
+                  count={slides.length}
+                  current={current}
+                  sandbox={artifact.sandbox}
+                  title={artifact.title}
+                />
+                <DeckControls
+                  current={current}
+                  total={slides.length}
+                  heading={slides[current]?.heading ?? ''}
+                  onGo={setCurrent}
+                />
+              </>
+            ) : editing ? (
               <EditableFrame
                 html={artifact.html}
                 width={artifact.width}
@@ -241,6 +297,18 @@ export function ArtifactPanel({
           </pre>
         )}
       </div>
+
+      {artifact && deck && !editing && showing === 'preview' && (
+        <DeckFilmstrip
+          html={artifact.html}
+          slides={slides}
+          width={artifact.width}
+          height={artifact.height}
+          current={current}
+          sandbox={artifact.sandbox}
+          onPick={setCurrent}
+        />
+      )}
 
       {artifact && !editing && (
         <footer className="shrink-0 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
@@ -314,6 +382,49 @@ function DownloadMenu({
         </>
       )}
     </span>
+  )
+}
+
+/** Where you are in the deck, and how to move. */
+function DeckControls({
+  current,
+  total,
+  heading,
+  onGo,
+}: {
+  current: number
+  total: number
+  heading: string
+  onGo: (index: number) => void
+}) {
+  if (total < 2) return null
+  return (
+    <div className="flex shrink-0 items-center gap-3 px-4 pb-1">
+      <Button
+        variant="ghost"
+        size="icon"
+        disabled={current === 0}
+        onClick={() => onGo(current - 1)}
+        aria-label="Previous slide"
+      >
+        <ChevronLeft className="size-4" aria-hidden />
+      </Button>
+      <span className="min-w-0 flex-1 truncate text-center text-xs text-muted-foreground">
+        <span className="font-mono tabular-nums">
+          {current + 1} / {total}
+        </span>
+        {heading && <span className="ml-2">{heading}</span>}
+      </span>
+      <Button
+        variant="ghost"
+        size="icon"
+        disabled={current >= total - 1}
+        onClick={() => onGo(current + 1)}
+        aria-label="Next slide"
+      >
+        <ChevronRight className="size-4" aria-hidden />
+      </Button>
+    </div>
   )
 }
 
