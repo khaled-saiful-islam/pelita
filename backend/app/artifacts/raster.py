@@ -48,8 +48,14 @@ async def _ensure_browser() -> Any:
             ) from exc
         try:
             _playwright = await async_playwright().start()
+            # The browser's own sandbox stays on. What is rendered here is a
+            # document a model wrote, and turning the sandbox off to make it
+            # start in a container means a renderer bug runs as this process.
+            # `--disable-dev-shm-usage` is the container fix that is actually
+            # about containers: /dev/shm defaults to 64 MB and Chromium wants
+            # more.
             _browser = await _playwright.chromium.launch(
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
+                args=["--disable-dev-shm-usage"]
             )
         except Exception as exc:  # noqa: BLE001 - any launch failure is the same to a caller
             raise RasterUnavailable(
@@ -76,18 +82,22 @@ async def to_png(html: str, *, width: int, height: int, scale: int = 2) -> bytes
     places that resize it, and a crisp file survives both.
     """
     browser = await _ensure_browser()
-    page = await browser.new_page(
+    # Its own context, discarded with the page. Two exports never share a
+    # cookie jar, a cache or anything a document could leave behind for the
+    # next one.
+    context = await browser.new_context(
         viewport={"width": max(width, 1), "height": max(height, 1)},
         device_scale_factor=scale,
+        java_script_enabled=False,
     )
+    page = await context.new_page()
     try:
         await page.set_content(html, wait_until="load", timeout=LOAD_TIMEOUT_MS)
         # Fonts first: a poster screenshotted before its display face arrives
         # is a poster in the fallback face, and it looks like a different one.
-        try:
-            await page.evaluate("document.fonts && document.fonts.ready")
-        except Exception:  # noqa: BLE001 - an old engine without the API is fine
-            logger.debug("no font loading API; exporting anyway")
+        # Waited for by the clock rather than by asking the document, because
+        # scripting is off in here — a poster has none of its own, and a
+        # renderer that runs none cannot be made to run any.
         await page.wait_for_timeout(FONT_SETTLE_MS)
 
         canvas = await page.query_selector(".canvas")
@@ -97,4 +107,4 @@ async def to_png(html: str, *, width: int, height: int, scale: int = 2) -> bytes
             return await canvas.screenshot(type="png")
         return await page.screenshot(type="png")
     finally:
-        await page.close()
+        await context.close()

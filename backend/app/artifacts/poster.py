@@ -44,6 +44,7 @@ from app.artifacts.imagery import (
     find_photo,
     photo_brief,
     reattach,
+    use_the_real_photograph,
 )
 from app.artifacts.model import ArtifactModel, Written
 from app.artifacts.poster_prompts import (
@@ -151,7 +152,15 @@ class PosterKind:
         # because a base64 image costs more tokens than the entire poster and
         # a repair pass that carried one would pay for it twice.
         def finished(document: str) -> str:
-            return attach_photo(document, photo) if photo is not None else document
+            if photo is None:
+                return document
+            # A model told a variable holds the picture will still sometimes
+            # write a stock URL of its own. Pointing it at the photograph we
+            # actually have beats refusing the whole poster over it.
+            corrected, swapped = use_the_real_photograph(document)
+            if swapped:
+                logger.info("redirected %d invented image url(s) to the real one", swapped)
+            return attach_photo(corrected, photo)
 
         yield Step(label="Checking it fits")
         findings = self._check(finished(html), spec)
@@ -293,6 +302,11 @@ class PosterKind:
             yield update
 
         revised, usage = written.text, written.usage
+        if photo is not None or existing:
+            corrected, swapped = use_the_real_photograph(revised)
+            if swapped:
+                logger.info("redirected %d invented image url(s) to the real one", swapped)
+            revised = corrected
         if photo is not None:
             revised = attach_photo(revised, photo)
         elif existing:

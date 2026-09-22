@@ -72,7 +72,13 @@ def transport(routes: dict[str, httpx.Response]) -> httpx.MockTransport:
 
 @pytest.fixture
 def mocked(monkeypatch):
-    """Patch the client `find_photo` opens, so nothing reaches the network."""
+    """Patch the client `find_photo` opens, so nothing reaches the network.
+
+    The address check is satisfied too: these hosts do not resolve at all, and
+    the guard that refuses private addresses refuses unresolvable ones as well.
+    Its own behaviour is tested separately, below.
+    """
+    import socket as socket_module
 
     def install(routes: dict[str, httpx.Response]):
         original = httpx.AsyncClient
@@ -82,6 +88,9 @@ def mocked(monkeypatch):
             return original(*args, **kwargs)
 
         monkeypatch.setattr(httpx, "AsyncClient", build)
+        monkeypatch.setattr(
+            socket_module, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
+        )
 
     return install
 
@@ -226,3 +235,104 @@ def test_a_change_that_sounds_like_it_wants_a_picture(instruction: str) -> None:
 @pytest.mark.parametrize("instruction", ["make it warmer", "bigger date", "remove the border"])
 def test_a_change_that_does_not(instruction: str) -> None:
     assert not WANTS_A_PICTURE.search(instruction)
+
+
+# --- where a picture may come from --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://pictures.test/a.png",  # not https
+        "https://localhost/a.png",
+        "https://127.0.0.1/a.png",
+        "https://169.254.169.254/latest/meta-data/",  # the cloud metadata service
+        "https://10.0.0.5/a.png",
+        "https://192.168.1.1/a.png",
+        "https://[::1]/a.png",
+        "https://0.0.0.0/a.png",
+        "not a url at all",
+    ],
+)
+def test_a_picture_may_not_come_from_somewhere_private(url: str) -> None:
+    """These URLs come from a search engine, which is to say from anybody. A
+    server that fetches whatever it is handed will fetch its own metadata
+    service and hand the result back as a photograph."""
+    from app.artifacts.imagery import reaches_the_public_internet
+
+    assert reaches_the_public_internet(url) is False
+
+
+def test_a_name_that_resolves_somewhere_private_is_refused(monkeypatch) -> None:
+    """Resolved rather than pattern-matched: `127.0.0.1` has a hundred
+    spellings and a DNS name pointing at it has infinitely many."""
+    import socket as socket_module
+
+    from app.artifacts.imagery import reaches_the_public_internet
+
+    monkeypatch.setattr(
+        socket_module,
+        "getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("127.0.0.1", 443))],
+    )
+    assert reaches_the_public_internet("https://sneaky.test/a.png") is False
+
+
+def test_a_name_that_answers_with_one_good_address_and_one_bad_is_refused(
+    monkeypatch,
+) -> None:
+    """Answering with a public address and a private one is the attack."""
+    import socket as socket_module
+
+    from app.artifacts.imagery import reaches_the_public_internet
+
+    monkeypatch.setattr(
+        socket_module,
+        "getaddrinfo",
+        lambda *a, **k: [
+            (2, 1, 6, "", ("93.184.216.34", 443)),
+            (2, 1, 6, "", ("10.1.2.3", 443)),
+        ],
+    )
+    assert reaches_the_public_internet("https://mixed.test/a.png") is False
+
+
+def test_an_ordinary_public_picture_is_allowed(monkeypatch) -> None:
+    import socket as socket_module
+
+    from app.artifacts.imagery import reaches_the_public_internet
+
+    monkeypatch.setattr(
+        socket_module, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))]
+    )
+    assert reaches_the_public_internet("https://pictures.test/a.png") is True
+
+
+# --- when the model writes a URL anyway ---------------------------------
+
+
+def test_an_invented_url_is_pointed_at_the_photograph_we_have() -> None:
+    """Told a variable holds the picture, a model still sometimes writes a
+    stock URL it has seen a thousand times. Refusing the whole poster over it
+    means somebody who asked for a picture gets no picture."""
+    from app.artifacts.imagery import use_the_real_photograph
+
+    document = (
+        '<html><head><link href="https://fonts.googleapis.com/css2?family=Lora">'
+        "<style>.bg{background-image:url('https://images.unsplash.com/photo-123?w=1536')}"
+        "</style></head><body></body></html>"
+    )
+    fixed, swapped = use_the_real_photograph(document)
+
+    assert swapped == 1
+    assert "background-image:var(--photo)" in fixed.replace(" ", "")
+    assert "unsplash" not in fixed
+    # The fonts stylesheet is a link, not an image, and is left alone.
+    assert "fonts.googleapis.com" in fixed
+
+
+def test_a_document_with_no_invented_urls_is_untouched() -> None:
+    from app.artifacts.imagery import use_the_real_photograph
+
+    document = "<html><head><style>.bg{background-image:var(--photo)}</style></head></html>"
+    assert use_the_real_photograph(document) == (document, 0)

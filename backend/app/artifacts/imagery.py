@@ -18,10 +18,13 @@ costs more than the poster does.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import logging
 import re
+import socket
 from dataclasses import dataclass
 from io import BytesIO
+from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image, UnidentifiedImageError
@@ -41,6 +44,9 @@ MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024
 # After re-encoding. A photograph past this is dropped rather than shipped.
 MAX_EMBEDDED_BYTES = 450 * 1024
 CANDIDATES = 5
+# At most one hop. A redirect is normal for an image CDN; a chain of them is
+# how a public URL ends up pointing somewhere private.
+MAX_REDIRECTS = 1
 
 _VARIABLE = "--photo"
 
@@ -79,7 +85,8 @@ async def find_photo(
         logger.info("no photograph for %r: %s", query, exc)
         return None
 
-    async with httpx.AsyncClient(timeout=deadline, follow_redirects=True) as client:
+    # Redirects are followed by hand, so each hop can be checked.
+    async with httpx.AsyncClient(timeout=deadline, follow_redirects=False) as client:
         for result in results:
             url = result.image_url or result.thumbnail_url
             if not url.startswith("https://"):
@@ -97,9 +104,66 @@ async def find_photo(
     return None
 
 
-async def _fetch(client: httpx.AsyncClient, url: str, *, source: str) -> Photo | None:
+def reaches_the_public_internet(url: str) -> bool:
+    """Whether this URL points somewhere a stranger could also reach.
+
+    These URLs come from a search engine, which is to say from the web, which
+    is to say from anybody. A server that fetches whatever it is handed will
+    happily fetch its own metadata service, a database on the private network,
+    or localhost — and hand the result back as a "photograph".
+
+    So the host is resolved and the address checked before anything is
+    requested. Resolved rather than pattern-matched, because `127.0.0.1` has a
+    hundred spellings and a DNS name that resolves to it has infinitely many.
+    """
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        return False
     try:
-        response = await client.get(url, headers={"Accept": "image/*"})
+        found = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError, ValueError):
+        return False
+
+    for *_, address in found:
+        try:
+            ip = ipaddress.ip_address(address[0])
+        except ValueError:
+            return False
+        # Every address it resolves to, not just the first: a name that answers
+        # with one public address and one private one is the attack.
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            logger.info("refusing a picture at a non-public address: %s", parts.hostname)
+            return False
+    return bool(found)
+
+
+async def _fetch(client: httpx.AsyncClient, url: str, *, source: str) -> Photo | None:
+    hops = 0
+    try:
+        while True:
+            if not reaches_the_public_internet(url):
+                return None
+            response = await client.get(url, headers={"Accept": "image/*"})
+            if response.is_redirect and response.headers.get("location"):
+                # Followed by hand so every hop is checked. `follow_redirects`
+                # would take the second one on trust, which is where a public
+                # URL turns into a private one.
+                hops += 1
+                if hops > MAX_REDIRECTS:
+                    return None
+                url = str(response.next_request.url) if response.next_request else ""
+                if not url:
+                    return None
+                continue
+            break
+
         if response.status_code >= 400:
             return None
         if not response.headers.get("content-type", "").startswith("image/"):
@@ -186,6 +250,33 @@ def reattach(document: str, data_uri: str) -> str:
     return attach_photo(document, Photo(data_uri=data_uri, source="", width=0, height=0))
 
 
+# `url(https://...)` inside a stylesheet. Not `<link href=...>`, which is how
+# the fonts arrive and is allowed.
+_STYLE_URL = re.compile(
+    r"url\(\s*['\"]?(https?://[^)'\"]+)['\"]?\s*\)", re.IGNORECASE
+)
+
+
+def use_the_real_photograph(document: str) -> tuple[str, int]:
+    """Point every invented image URL at the picture we actually have.
+
+    Told that a variable holds a photograph, a model will still sometimes write
+    a URL of its own — a plausible one, from a stock library it has seen a
+    thousand times, which resolves to nothing or to something else entirely.
+
+    Refusing the whole revision over it means somebody who asked for a picture
+    gets no picture. Substituting is deterministic, touches only the thing that
+    was wrong, and ends with the poster using the photograph that was found for
+    it.
+    """
+    style_start = document.lower().find("<style")
+    if style_start == -1:
+        return document, 0
+    head, tail = document[:style_start], document[style_start:]
+    swapped, count = _STYLE_URL.subn(f"var({_VARIABLE})", tail)
+    return head + swapped, count
+
+
 # English-only, like the other pattern layers here. A miss means the change is
 # made without looking for a picture, which is the common case anyway.
 WANTS_A_PICTURE = re.compile(
@@ -208,6 +299,9 @@ def photo_brief(photo: Photo) -> str:
         "above it in a colour that clears 4.5:1 against the darkest part of "
         "the picture. Text laid straight onto a photograph is unreadable in "
         "half of it.\n"
-        f"Do not write the url yourself and do not use any other image: "
-        f"`var({_VARIABLE})` is the only one that exists."
+        f"Write `var({_VARIABLE})` and nothing else. Do not write a URL - not "
+        "an unsplash.com one, not a picsum one, not any other; you are not "
+        "able to know that one exists, and one you write points at nothing or "
+        f"at something else entirely. `var({_VARIABLE})` is the only image "
+        "there is."
     )
