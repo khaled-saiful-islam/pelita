@@ -335,3 +335,39 @@ async def test_a_broken_game_is_reported_rather_than_shown_as_fine() -> None:
     updates = await built(GamesKind(model, playtest=False))  # type: ignore[arg-type]
 
     assert any("freeze" in f for f in updates[-1].built.findings)
+
+
+def test_a_game_that_wedges_the_browser_is_the_worst_result_not_a_pass() -> None:
+    """A real generation sat for five minutes with Chromium still running and
+    nothing coming back: the probe has no timeout of its own, so a game that
+    blocks its own thread blocked the build, the stream and the turn."""
+    frozen = Playtest(froze=True, painted=False, loops=False)
+
+    assert not frozen.ok
+    assert "locked up the browser" in frozen.complaints()[0]
+
+
+def test_the_freeze_is_reported_before_anything_it_caused() -> None:
+    frozen = Playtest(froze=True, painted=False, loops=False)
+    assert "locked up" in frozen.complaints()[0]
+    assert len(frozen.complaints()) > 1  # the blank screen is still mentioned
+
+
+def test_the_playtest_is_bounded() -> None:
+    from app.artifacts.playtest import BUDGET_S, PROBE_S
+
+    assert 0 < BUDGET_S <= 60
+    assert 0 < PROBE_S <= 10
+
+
+def test_the_probe_is_bounded_from_outside_not_by_an_argument() -> None:
+    """`page.evaluate` has no `timeout` parameter; passing one is a TypeError
+    that fires on every game that gets as far as being probed."""
+    import inspect
+
+    from app.artifacts import playtest
+
+    body = inspect.getsource(playtest._run)
+    assert "page.evaluate(_PROBE)" in body
+    assert "evaluate(_PROBE, timeout" not in body
+    assert body.count("asyncio.wait_for(page.evaluate(_PROBE)") == 2

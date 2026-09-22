@@ -76,8 +76,14 @@ explanation, no code fence.
   calling itself. A blocking loop freezes the tab and the game is thrown away.
 - Declare before use. The single most common way this fails is a function
   called in the first frame and defined nowhere.
-- Nothing may be measured from `window.innerWidth`. The game is exactly
-  {GAME_WIDTH}x{GAME_HEIGHT} and is scaled by whatever shows it.
+- **Everything lives inside one `<div class="canvas">` of exactly
+  {GAME_WIDTH}x{GAME_HEIGHT} pixels**, `position: relative`, with the canvas,
+  the HUD and every overlay inside it. This is the game's surface and the
+  thing that gets scaled to fit. A game whose layout depends on the window
+  having a height collapses to nothing when it is framed -- it draws, and no
+  part of it is on screen.
+- Nothing may be measured from `window.innerWidth`, and no `vh`/`vw`. The game
+  is exactly {GAME_WIDTH}x{GAME_HEIGHT} and is scaled by whatever shows it.
 
 ## It has to be playable
 

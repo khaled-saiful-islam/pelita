@@ -145,6 +145,7 @@ class GamesKind:
         html = strip_fence(written.text).strip()
         if not html:
             raise ArtifactUnavailable("The game could not be written.")
+        html = stage(html)
 
         findings = self._check(html)
         html, findings, note = await self._make_it_run(html, findings)
@@ -188,6 +189,8 @@ class GamesKind:
             yield update
 
         updated = strip_fence(changed.text).strip()
+        if updated:
+            updated = stage(updated)
         if not updated:
             raise ArtifactUnavailable("That change came back empty. The game is as it was.")
 
@@ -243,6 +246,8 @@ class GamesKind:
             ):
                 pass
             candidate = strip_fence(repaired.text).strip()
+            if candidate:
+                candidate = stage(candidate)
             if not candidate:
                 return html, findings + tuple(Finding(c) for c in complaints), _survivable(result)
             html = candidate
@@ -324,6 +329,38 @@ class GamesKind:
             if now - last_said >= 0.5:
                 last_said = now
                 yield Step(label=label, detail=f"{written // 1000} KB so far")
+
+
+def stage(html: str) -> str:
+    """The game with its surface asserted, whatever its stylesheet says.
+
+    A game is framed at its own size, so the document has no viewport to fill
+    and `height: 100%` on a body whose html has no height resolves to nothing.
+    The result is a game that draws correctly into a box measuring zero by
+    zero: every pixel is right and none of them are on screen. That is a real
+    one -- a snake game shipped with a blank panel and a playtest that called
+    it clean.
+
+    Appended at the end of the head so a later rule of equal specificity wins
+    without `!important`, the same way a slide's size is restated after its
+    design has had its say.
+    """
+    guard = (
+        "<style>\n"
+        "html, body { margin: 0; padding: 0; overflow: hidden; }\n"
+        f"html, body {{ width: {GAME_WIDTH}px; height: {GAME_HEIGHT}px; }}\n"
+        f".canvas {{ position: relative; width: {GAME_WIDTH}px; "
+        f"height: {GAME_HEIGHT}px; overflow: hidden; box-sizing: border-box; }}\n"
+        "</style>"
+    )
+    lowered = html.lower()
+    at = lowered.rfind("</head>")
+    if at != -1:
+        return html[:at] + guard + html[at:]
+    at = lowered.find("<body")
+    if at != -1:
+        return html[:at] + guard + html[at:]
+    return guard + html
 
 
 # --- reading what came back ------------------------------------------------
