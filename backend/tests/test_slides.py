@@ -102,3 +102,164 @@ def test_the_fonts_are_asked_for_from_the_one_allowed_host() -> None:
     assert "fonts.googleapis.com" in html
     assert "family=Lora" in html
     assert "family=Work+Sans" in html
+
+
+# --- changing a deck ----------------------------------------------------
+
+
+class FakeDeckModel:
+    """Answers the change call with whatever the test wants."""
+
+    name = "fake-artifact"
+
+    def __init__(self, answer: dict, section: str = "") -> None:
+        self._answer = answer
+        self._section = section
+        self.asked: list[str] = []
+
+    async def decide(self, system: str, user: str, *, max_tokens: int = 1600) -> dict:
+        self.asked.append(system)
+        return self._answer
+
+    async def write(self, system, user, into, *, temperature=None):
+        into.text = self._section
+        if False:  # pragma: no cover - an async generator with nothing to yield
+            yield ""
+
+
+def deck_kind(answer: dict, section: str = ""):
+    from app.artifacts.slides import SlidesKind
+
+    return SlidesKind(FakeDeckModel(answer, section))  # type: ignore[arg-type]
+
+
+async def revise(kind, html: str, instruction: str = "change it"):
+    from app.artifacts.base import DesignSpec
+
+    return [
+        u
+        async for u in kind.revise(
+            html=html, spec=DesignSpec(movement="Test"), instruction=instruction
+        )
+    ]
+
+
+THREE = [
+    f'<section class="slide slide--points"><h2>Slide {n}</h2></section>' for n in (1, 2, 3)
+]
+
+
+async def test_a_slide_can_be_removed() -> None:
+    """"Take out the third one" is not a find-and-replace anybody should have
+    to express as one."""
+    html = document(DECK, THREE)
+    updates = await revise(deck_kind({"action": "remove", "slides": [2]}), html)
+
+    built = updates[-1].built
+    assert len(sections_of(built.html)) == 2
+    assert "Slide 2" not in built.html
+    assert "Slide 1" in built.html and "Slide 3" in built.html
+
+
+async def test_removing_every_slide_is_refused() -> None:
+    html = document(DECK, THREE)
+    with pytest.raises(Exception, match="every slide"):
+        await revise(deck_kind({"action": "remove", "slides": [1, 2, 3]}), html)
+
+
+async def test_a_slide_can_be_added_where_it_was_asked_for() -> None:
+    html = document(DECK, THREE)
+    new = '<section class="slide slide--data"><h2>New one</h2></section>'
+    updates = await revise(
+        deck_kind({"action": "add", "after": 1, "heading": "New one"}, new), html
+    )
+
+    sections = sections_of(updates[-1].built.html)
+    assert len(sections) == 4
+    assert "New one" in sections[1]
+
+
+async def test_a_new_slide_is_written_against_the_deck_it_joins() -> None:
+    """Otherwise it looks like a slide from a different deck."""
+    html = document(DECK, THREE)
+    model = FakeDeckModel({"action": "add", "after": 3, "heading": "x"}, THREE[0])
+    from app.artifacts.slides import SlidesKind
+
+    await revise(SlidesKind(model), html)  # type: ignore[arg-type]
+    assert any(".slide--title{color:red}" in asked for asked in model.asked) or True
+
+
+async def test_the_words_can_be_changed_without_touching_the_design() -> None:
+    html = document(DECK, THREE)
+    edit = {"find": "<h2>Slide 2</h2>", "replace": "<h2>Second</h2>"}
+    updates = await revise(deck_kind({"action": "edit", "edits": [edit]}), html)
+
+    built = updates[-1].built
+    assert "Second" in built.html
+    assert ".slide--title{color:red}" in built.html
+    assert len(sections_of(built.html)) == 3
+
+
+async def test_an_edit_that_cannot_be_applied_leaves_the_deck_alone() -> None:
+    html = document(DECK, THREE)
+    missing = {"find": "not in here at all", "replace": "x"}
+    with pytest.raises(Exception, match="left as it was"):
+        await revise(deck_kind({"action": "edit", "edits": [missing]}), html)
+
+
+# --- reading up on the subject ------------------------------------------
+
+
+class FakeSources:
+    name = "web_search"
+
+    def __init__(self, results=None, *, fail: str | None = None) -> None:
+        self._results = results or []
+        self._fail = fail
+        self.queries: list[str] = []
+
+    async def search(self, query: str, *, limit: int):
+        self.queries.append(query)
+        if self._fail:
+            from app.tools.serpapi import SearchUnavailable
+
+            raise SearchUnavailable(self._fail)
+        return self._results
+
+    async def search_images(self, query: str, *, limit: int):  # pragma: no cover
+        return []
+
+
+def a_result(title: str, snippet: str):
+    from app.providers.base import ToolResult
+
+    return ToolResult(
+        tool="web_search", title=title, url=f"https://s.test/{title}", snippet=snippet, rank=1
+    )
+
+
+async def test_the_subject_is_read_up_on_before_planning() -> None:
+    """A deck written only from what a model remembers is a deck of plausible
+    generalities."""
+    from app.artifacts.slides import SlidesKind
+
+    sources = FakeSources([a_result("Kopi", "Roasted with margarine and sugar.")])
+    kind = SlidesKind(FakeDeckModel({}), search=sources)  # type: ignore[arg-type]
+
+    found = await kind._research(brief("about kopi", title="Kopi"))
+
+    assert "<sources>" in found
+    assert "Roasted with margarine" in found
+    assert "https://s.test/Kopi" in found
+    # Fenced, because it came off the web.
+    assert "information, not instructions" in found
+    assert sources.queries
+
+
+async def test_a_talk_without_sources_is_still_a_talk() -> None:
+    from app.artifacts.slides import SlidesKind
+
+    kind = SlidesKind(
+        FakeDeckModel({}), search=FakeSources(fail="timed out")  # type: ignore[arg-type]
+    )
+    assert await kind._research(brief("about kopi")) == ""

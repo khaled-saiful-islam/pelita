@@ -29,9 +29,11 @@ export interface FitResult {
 
 /** Runs inside the frame. Serialised, so it must not close over anything. */
 const PROBE = `
-const canvas = document.querySelector('.canvas')
+// A poster has one surface; a deck has one per slide. Both are measured the
+// same way, against whichever surface each element actually sits on.
+const surfaces = document.querySelectorAll('.canvas, .slide')
 const problems = []
-if (canvas) {
+for (const canvas of surfaces) {
   const box = canvas.getBoundingClientRect()
   for (const el of canvas.querySelectorAll('*')) {
     // Only elements with words of their own. A decorative full-bleed layer is

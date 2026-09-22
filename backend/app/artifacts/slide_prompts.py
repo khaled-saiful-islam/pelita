@@ -139,3 +139,36 @@ so and given the variable that holds it; that is the only image there is.
 
 Reply with the `<section>` element and nothing else.
 """
+
+
+DECK_CHANGE_SYSTEM = """
+Somebody wants one thing different about a deck that already exists. Work out
+which of three things they are asking for, and reply with JSON and nothing
+else.
+
+To change what is on the slides — a colour, a word, a heading, a layout:
+
+{"action": "edit",
+ "edits": [{"find": "exact text from the document", "replace": "what it becomes"}]}
+
+`find` must be copied character for character out of the document and appear
+exactly once in it. Make as few edits as the change needs, and never restate
+the whole document as one edit. Everything not named stays exactly as it is:
+they are looking at a deck they largely like.
+
+To add a slide:
+
+{"action": "add", "after": 3, "heading": "what it says",
+ "layout": "one of: title, agenda, statement, points, split, compare, data,
+ quote, process, image, closing", "content": "the substance, in prose",
+ "speaker_notes": "what the presenter adds"}
+
+`after` is the number of the slide it follows, counting from 1. Zero puts it
+first.
+
+To remove slides:
+
+{"action": "remove", "slides": [4]}
+
+Numbered from 1. Removing the only slide is not a change anybody wants.
+"""

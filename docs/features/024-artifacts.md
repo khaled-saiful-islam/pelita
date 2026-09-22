@@ -1,4 +1,4 @@
-# 024 — Artifacts, starting with posters
+# 024 — Artifacts: posters and slide decks
 
 ## What it does
 
@@ -20,7 +20,8 @@ you   Design a wide banner for a badminton tournament at Dewan
 ```
 
 An artifact is **one self-contained HTML document**. That is the whole format,
-and it is why this feature adds no service, no build step and no dependency.
+and it is why this feature adds no service, no build step and no dependency. A
+poster is one canvas; a deck is one `<section>` per slide in the same file.
 
 ## How it works
 
@@ -54,6 +55,48 @@ Nothing about the result is fixed. The model chooses its own palette, its own
 two faces from anything Google Fonts serves, and its own canvas — a printed
 flyer, a square social post and a wide banner are the same kind and different
 shapes. Only a floor, a ceiling and a default are imposed on the size.
+
+### Slide decks
+
+A deck is the second kind, and the seam held: one file implementing
+`ArtifactKind`, one line in the registry. It is built in three jobs, because
+they are three jobs and a model asked to do all of them at once does the last
+one badly.
+
+| step | produces |
+|---|---|
+| research | what the web says about the subject, when a search key exists |
+| **outline** | what the talk argues, and what each slide does for it |
+| **design** | one stylesheet the whole deck shares: palette, two faces, a layout per slide type |
+| **write** | one call per slide, three at a time |
+
+The outline is where a deck is won or lost, so that prompt is the longest one
+in the feature. Each slide names its layout from a fixed set — title, agenda,
+statement, points, split, compare, data, quote, process, image, closing — and
+the same layout may not run three times, because a deck of ten bullet slides is
+the most boring object in professional life. Text is bounded at 12–55 words a
+slide: fewer is a poster, more is a document somebody reads while you talk over
+it.
+
+Slides are written at once and **reported in order**. Out of sequence they
+arrive as a jumble. The plan is announced before any slide exists, so the panel
+puts up the whole shape and fills it in.
+
+Ten slides take about two minutes, of which the first seventy seconds are
+deciding what to say and how it should look.
+
+**Navigating**: previous and next, a counter with the current heading, arrow
+keys, Home and End, and a filmstrip of real thumbnails. The deck is loaded once
+and translated by whole slides rather than reloaded — reloading flashes and
+refetches the fonts, and hiding the other slides with `display: none` stops CSS
+counters, which numbers every slide one.
+
+**Changing a deck** has three shapes: edit what is on the slides, add a slide,
+remove one. Adding writes the new slide against the deck's own stylesheet, so
+it belongs. All three make a new version; correcting a word with the pencil
+still does not.
+
+**Downloading** a deck gives a PDF, one slide to a page.
 
 ### A photograph, when the design wants one
 
@@ -109,8 +152,11 @@ is shown until that answers.
 | kind | scripts | network | iframe |
 |---|---|---|---|
 | **poster** | none | fonts only | `sandbox=""` |
-| slides *(later)* | minimal | fonts only | `allow-scripts` |
+| **slides** | none | fonts only | `sandbox=""` |
 | app *(later)* | yes | allow-list | `allow-scripts` |
+
+Slides need no scripts either: navigation happens in the panel, which moves the
+frame rather than reaching into it.
 
 A poster is static art, so the frame it renders in cannot run a script. The
 same policy drives the iframe attribute and the `Content-Security-Policy`
@@ -185,10 +231,11 @@ the same rule as search without a key.
 
 ## How to extend it
 
-**A new kind** — slides, a one-page app, a résumé — is one file implementing
+**A new kind** — a one-page app, a résumé, a certificate — is one file implementing
 `ArtifactKind` and one line in `artifacts/registry.py`. It brings its own
-schema fragment, prompt, canvas and sandbox policy. The tool's `kind` enum is
-built from the registry, so a new kind is offered to the model by existing.
+prompt, canvas and sandbox policy. The tool's `kind` enum is built from the
+registry, and so is the Create menu in the composer — a new kind is offered to
+the model and shown to the person by existing.
 
 **A build queue.** Generation runs inside the open SSE stream, which is right
 for a single-worker deployment. `ArtifactKind.build` is an interface; a queued
@@ -206,6 +253,10 @@ documented failure of every implementation that has tried it.
 - **A found photograph is somebody else's.** The source page is recorded on the
   artifact, but nothing checks its licence.
 - **One artifact per turn.** Two would race for the same panel.
+- **A deck takes about two minutes** for ten slides, and costs roughly four
+  times a poster.
+- **Speaker notes are in the file but nothing shows them yet.** They are
+  `display: none`, waiting for a present mode.
 - **A build is 40–90 seconds**, roughly half of it refinement.
 - **A content edit costs a composing call.** Only words are free.
 - **Print fidelity is the browser's.** No bleed, no crop marks, no CMYK. A
