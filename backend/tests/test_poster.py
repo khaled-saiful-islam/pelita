@@ -382,7 +382,7 @@ def test_the_prompts_have_not_drifted() -> None:
     """One hash over all three, so a change to the product is a change to this
     line. If you meant it, update the digest in the same commit as the prompt."""
     combined = "\n".join([DIRECTION_SYSTEM, COMPOSE_SYSTEM, REFINE_SYSTEM]).encode()
-    assert hashlib.sha256(combined).hexdigest()[:16] == "7e5614102e302dfa"
+    assert hashlib.sha256(combined).hexdigest()[:16] == "0014f67c05e2476a"
 
 
 # --- asking for a change ------------------------------------------------
@@ -457,6 +457,6 @@ async def test_a_poster_may_use_a_photograph_it_was_given() -> None:
     """Never one it invented. A model cannot produce a photograph and cannot
     know one exists, so a URL it writes renders as a broken box."""
     assert "Never write an image URL" in COMPOSE_SYSTEM
-    assert "image_query" in DIRECTION_SYSTEM
+    assert "image_queries" in DIRECTION_SYSTEM
     # And the direction step is told that most posters are better without one.
     assert "Empty is the right" in DIRECTION_SYSTEM

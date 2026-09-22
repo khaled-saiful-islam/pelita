@@ -68,7 +68,13 @@ class _Reader(HTMLParser):
         self.external: list[str] = []
         self.style_text = ""
         self.has_canvas = False
+        # Which classes and tags actually hold words. Clipping matters on
+        # those and nowhere else: a card clipping a picture to its corners is
+        # ordinary CSS, and a heading clipping itself is a bug.
+        self.text_classes: set[str] = set()
+        self.text_tags: set[str] = set()
         self._in_style = False
+        self._open: list[tuple[str, tuple[str, ...]]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.tags.append(tag)
@@ -90,13 +96,30 @@ class _Reader(HTMLParser):
             if name in {"src", "href"} and value:
                 self._note_url(value)
 
+        classes = tuple(
+            (next((v or "" for k, v in attrs if k == "class"), "")).split()
+        )
+        self._open.append((tag, classes))
+
     def handle_endtag(self, tag: str) -> None:
         if tag == "style":
             self._in_style = False
+        for index in range(len(self._open) - 1, -1, -1):
+            if self._open[index][0] == tag:
+                del self._open[index:]
+                break
 
     def handle_data(self, data: str) -> None:
         if self._in_style:
             self.style_text += data
+            return
+        if not data.strip() or not self._open:
+            return
+        # The element this text sits directly inside, not its ancestors. A
+        # wrapper containing a heading does not itself hold words.
+        tag, classes = self._open[-1]
+        self.text_tags.add(tag)
+        self.text_classes.update(classes)
 
     def _note_url(self, value: str) -> None:
         match = _URL.match(value.strip())
@@ -172,7 +195,29 @@ def _invented(reader: _Reader) -> list[Finding]:
     ]
 
 
-def _fit(style: str, spec: DesignSpec) -> list[Finding]:
+_SELECTOR_PART = re.compile(r"[.#]?[A-Za-z][\w-]*")
+
+
+def _holds_words(selector: str, reader: _Reader) -> bool:
+    """Whether this rule targets something that actually contains text.
+
+    Clipping a card so a photograph follows its rounded corners is ordinary
+    CSS and was being refused. Clipping a heading cuts the tail off its own g.
+    The difference is not in the rule; it is in what the rule is pointing at,
+    which is why this looks at the document rather than at the stylesheet.
+    """
+    for part in _SELECTOR_PART.findall(selector):
+        if part.startswith("."):
+            if part[1:] in reader.text_classes:
+                return True
+        elif part.startswith("#"):
+            continue
+        elif part.lower() in reader.text_tags:
+            return True
+    return False
+
+
+def _fit(style: str, spec: DesignSpec, reader: _Reader) -> list[Finding]:
     """The structural causes of a poster that does not fit its frame.
 
     None of this proves a layout fits — that needs real font metrics and a real
@@ -207,14 +252,17 @@ def _fit(style: str, spec: DesignSpec) -> list[Finding]:
     clipping = [
         selector.strip().replace("\n", " ")
         for selector, body in _RULE.findall(style)
-        if _HIDDEN.search(body) and ".canvas" not in selector
+        if _HIDDEN.search(body)
+        and ".canvas" not in selector
+        and _holds_words(selector, reader)
     ]
     if clipping:
         findings.append(
             Finding(
-                f"{clipping[0]} clips its own content",
-                "only the canvas may clip - a text block set to overflow: "
-                "hidden cuts the descenders off its own headline",
+                f"{clipping[0]} clips its own text",
+                "a text block set to overflow: hidden cuts the descenders off "
+                "its own headline - give it room instead, or clip a wrapper "
+                "that holds no words",
             )
         )
     if _SCROLLS.search(style):
@@ -271,7 +319,7 @@ def check(
         *_capability(reader, sandbox),
         *_images(reader, style),
         *_invented(reader),
-        *_fit(style, spec),
+        *_fit(style, spec, reader),
     ]
     size = len(document.encode())
     if size > max_bytes:

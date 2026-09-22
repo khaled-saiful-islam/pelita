@@ -113,9 +113,13 @@ A PHOTOGRAPH, IF THE DESIGN WANTS ONE
   posters are type, colour and drawn shape, and a stock photograph behind a
   headline is the most generic thing a poster can be.
 - If the person asked for an image, they get one. Their words win.
-- `image_query` is what to search for: concrete, visual and specific, the words
-  a picture library would have tagged it with. "night market food stalls,
-  lanterns, warm light" - not "durian festival poster background".
+- `image_queries` is a list of what to search for: concrete, visual and
+  specific, the words a picture library would have tagged them with. "night
+  market food stalls, lanterns, warm light" - not "durian festival poster
+  background".
+- One is the usual answer. Ask for two or three only when the design actually
+  shows several - a strip of dishes, a pair of portraits, a grid. Never more
+  than three.
 - Leave it empty when the design is better without one. Empty is the right
   answer more often than not.
 
@@ -131,7 +135,7 @@ Reply with JSON and nothing else. No prose, no code fence. Exactly these keys:
   "width": 794,
   "height": 1123,
   "shape": "one clause on why that size",
-  "image_query": "what to search for, or empty when type and colour do it better",
+  "image_queries": ["what to search for; empty when type and colour do it better"],
   "layout": "one sentence",
   "motif": "the recurring graphic idea, in a few words",
   "reference": "the subtle reference, in a few words"}}
@@ -299,8 +303,10 @@ would have tagged the photograph with, not a description of the poster.
 "night market food stalls, lanterns, warm light" rather than "durian festival
 poster background".
 
-If the change does not want a photograph, or wants one removed, return an empty
-query. Reply with JSON and nothing else:
+Ask for two or three only when the change actually shows several - a strip of
+dishes, a pair of portraits, a grid. Never more than three. If the change does
+not want a photograph, or wants one removed, return an empty list. Reply with
+JSON and nothing else:
 
-{"image_query": "what to search for, or empty"}
+{"image_queries": ["what to search for; empty when none is wanted"]}
 """

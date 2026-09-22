@@ -23,7 +23,10 @@ class WebSearchTool(Tool):
     )
     parameters = text_parameter("query", "What to search the web for")
     presentation = ToolPresentation(
-        running="Searching the web", done="Searched the web", noun="result"
+        running="Searching the web",
+        done="Searched the web",
+        noun="result",
+        failed="Search unavailable",
     )
 
     def __init__(self, search: SearchProvider, *, limit: int = 5) -> None:

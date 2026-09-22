@@ -143,9 +143,9 @@ class DesignSpec:
     width: int = 0
     height: int = 0
     shape: str = ""
-    # What to look for, when the design genuinely wants a photograph. Empty
+    # What to look for, when the design genuinely wants photographs. Empty
     # means it does not, which is the right answer more often than not.
-    image_query: str = ""
+    image_queries: tuple[str, ...] = ()
     # Where the picture that was found came from, once there is one.
     image_source: str = ""
 
@@ -162,7 +162,7 @@ class DesignSpec:
             "width": self.width,
             "height": self.height,
             "shape": self.shape,
-            "image_query": self.image_query,
+            "image_queries": list(self.image_queries),
             "image_source": self.image_source,
         }
 
@@ -187,9 +187,24 @@ class DesignSpec:
             width=_as_int(raw.get("width")),
             height=_as_int(raw.get("height")),
             shape=str(raw.get("shape", "")),
-            image_query=str(raw.get("image_query", "")),
+            image_queries=read_queries(raw),
             image_source=str(raw.get("image_source", "")),
         )
+
+
+def read_queries(raw: dict[str, Any]) -> tuple[str, ...]:
+    """The searches this artifact wants, however the model phrased the field.
+
+    Asked for a list it usually sends one; asked for one it sometimes sends a
+    list. Both mean the same thing, and `image_query` is also what earlier
+    stored specs used.
+    """
+    value = raw.get("image_queries", raw.get("image_query"))
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(item).strip()[:200] for item in value if str(item).strip())
 
 
 def _as_int(value: Any) -> int:

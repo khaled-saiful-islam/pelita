@@ -127,28 +127,48 @@ def test_something_that_scrolls_is_caught() -> None:
     )
 
 
+def clipping(document: str) -> list[str]:
+    return [f for f in failures(document) if "clips its own text" in f]
+
+
 def test_a_text_block_that_clips_itself_is_caught() -> None:
     """The defect that produced a headline with the tail cut off its g. It
     looks like a broken font rather than a layout mistake, so it is missed
     every time a person eyeballs the result."""
-    found = failures(
-        GOOD.replace("h1 { text-wrap: balance; }", ".headline { overflow: hidden; }")
-    )
-    assert any("clips its own content" in f for f in found)
+    broken = GOOD.replace("h1 { text-wrap: balance; }", ".headline { overflow: hidden; }")
+    broken = broken.replace("<h1>Hello</h1>", '<h1 class="headline">Hello</h1>')
+    assert clipping(broken)
+
+
+def test_a_card_clipping_a_picture_is_ordinary_css() -> None:
+    """Clipping a card so a photograph follows its rounded corners is what
+    every card on every website does. Refusing it refused a real edit: "change
+    the BG colour, make it bright, add a few food images"."""
+    fine = GOOD.replace(
+        "h1 { text-wrap: balance; }",
+        "h1 { text-wrap: balance; } .food-card { overflow: hidden; border-radius: 12px; }",
+    ).replace("<h1>Hello</h1>", '<h1>Hello</h1><div class="food-card"></div>')
+    assert clipping(fine) == []
+
+
+def test_a_wrapper_holding_a_heading_may_still_clip() -> None:
+    """The words are in the heading, not in the box around it."""
+    fine = GOOD.replace(
+        "h1 { text-wrap: balance; }", ".frame { overflow: hidden; }"
+    ).replace("<h1>Hello</h1>", '<div class="frame"><h1>Hello</h1></div>')
+    assert clipping(fine) == []
 
 
 def test_a_comment_above_a_rule_is_not_mistaken_for_its_name() -> None:
-    found = failures(
-        GOOD.replace(
-            "h1 { text-wrap: balance; }",
-            "/* the smeared reflection */ .headline { overflow: hidden; }",
-        )
-    )
-    assert any(f.startswith(".headline") for f in found)
+    broken = GOOD.replace(
+        "h1 { text-wrap: balance; }",
+        "/* the smeared reflection */ .headline { overflow: hidden; }",
+    ).replace("<h1>Hello</h1>", '<h1 class="headline">Hello</h1>')
+    assert any(".headline" in f for f in clipping(broken))
 
 
 def test_only_the_canvas_may_clip() -> None:
-    assert not any("clips its own content" in f for f in failures(GOOD))
+    assert clipping(GOOD) == []
 
 
 def test_a_canvas_that_does_not_clip_is_caught() -> None:

@@ -37,6 +37,9 @@ class ToolPresentation:
     running: str  # "Searching the web"
     done: str  # "Searched the web"
     noun: str  # "result" — pluralised by the caller
+    # What to say when it could not run at all. A poster that failed to build
+    # reporting "Search unavailable" is a tool's words in another tool's mouth.
+    failed: str = "Could not finish"
 
 
 @runtime_checkable

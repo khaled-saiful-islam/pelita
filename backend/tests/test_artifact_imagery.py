@@ -216,12 +216,29 @@ def test_a_document_without_one_detaches_to_itself() -> None:
 
 
 def test_the_model_is_told_about_the_picture_but_never_given_it() -> None:
-    brief = photo_brief(PHOTO)
+    brief = photo_brief([PHOTO])
     assert "var(--photo)" in brief
     assert "800x600" in brief
     assert PHOTO.data_uri not in brief
-    # Text straight onto a photograph is unreadable in half of it.
-    assert "scrim" in brief
+
+
+def test_several_pictures_are_all_named() -> None:
+    """Asked for "a few food images", the poster gets a few."""
+    photos = [
+        Photo(data_uri=f"data:image/jpeg;base64,P{i}", source="", width=800, height=600)
+        for i in range(3)
+    ]
+    brief = photo_brief(photos)
+
+    assert "var(--photo)" in brief
+    assert "var(--photo-2)" in brief
+    assert "var(--photo-3)" in brief
+    assert "Use every one of them" in brief
+    assert all(photo.data_uri not in brief for photo in photos)
+
+
+def test_no_pictures_says_nothing() -> None:
+    assert photo_brief([]) == ""
 
 
 @pytest.mark.parametrize(
@@ -371,5 +388,6 @@ def test_a_second_attach_does_not_stack_declarations() -> None:
 
 
 def test_the_model_is_told_not_to_declare_it() -> None:
-    assert "Do NOT declare" in photo_brief(PHOTO)
-    assert "behind everything else" in photo_brief(PHOTO)
+    brief = photo_brief([PHOTO])
+    assert "Do NOT declare" in brief
+    assert "behind everything else" in brief

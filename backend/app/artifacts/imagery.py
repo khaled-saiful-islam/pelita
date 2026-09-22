@@ -22,6 +22,7 @@ import ipaddress
 import logging
 import re
 import socket
+from collections.abc import Sequence
 from dataclasses import dataclass
 from io import BytesIO
 from urllib.parse import urlsplit
@@ -44,11 +45,24 @@ MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024
 # After re-encoding. A photograph past this is dropped rather than shipped.
 MAX_EMBEDDED_BYTES = 450 * 1024
 CANDIDATES = 5
+# A poster is not an album. Three is enough for a strip of food, a pair of
+# portraits or a background plus a detail, and each one is a download and a
+# couple of hundred kilobytes in the document.
+MAX_PHOTOS = 3
 # At most one hop. A redirect is normal for an image CDN; a chain of them is
 # how a public URL ends up pointing somewhere private.
 MAX_REDIRECTS = 1
 
 _VARIABLE = "--photo"
+
+
+def variable_for(index: int) -> str:
+    """`--photo` for the first, `--photo-2` onward for the rest.
+
+    The first keeps its old name so posters made before there could be several
+    still work, and so the common case — one picture — reads as one word.
+    """
+    return _VARIABLE if index == 0 else f"{_VARIABLE}-{index + 1}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +79,22 @@ class Photo:
     @property
     def bytes(self) -> int:
         return len(self.data_uri)
+
+
+async def find_photos(
+    search: SearchProvider, queries: Sequence[str], *, deadline: float = 15.0
+) -> list[Photo]:
+    """One picture per query, in order, skipping the ones that come to nothing.
+
+    Sequential rather than concurrent: three of them is a handful of seconds,
+    and a poster build is already measured in tens.
+    """
+    found: list[Photo] = []
+    for query in list(queries)[:MAX_PHOTOS]:
+        photo = await find_photo(search, query, deadline=deadline)
+        if photo is not None:
+            found.append(photo)
+    return found
 
 
 async def find_photo(
@@ -206,32 +236,38 @@ def _encode(raw: bytes, *, source: str) -> Photo | None:
 
 # Any declaration of the variable, whoever wrote it.
 _ANY_DECLARATION = re.compile(
-    r"[ \t]*" + re.escape(_VARIABLE) + r"\s*:[^;{}]*;[ \t]*\n?", re.IGNORECASE
+    r"[ \t]*" + re.escape(_VARIABLE) + r"(?:-\d+)?\s*:[^;{}]*;[ \t]*\n?", re.IGNORECASE
 )
 # `:root { ... }`, so the picture can go in as the last word on the subject.
 _ROOT_BLOCK = re.compile(r"(:root\s*\{)([^{}]*)(\})", re.IGNORECASE | re.S)
 
 
-def attach_photo(document: str, photo: Photo) -> str:
-    """Put the picture into the document's `:root`, and make sure it stays put.
+def attach_photos(document: str, photos: Sequence[Photo]) -> str:
+    """Put the pictures into the document's `:root`, and make sure they stay.
 
     Two things have to be true, and only the first is obvious.
 
-    It goes in last. CSS takes the final declaration of a custom property, and
+    They go in last. CSS takes the final declaration of a custom property, and
     a model told that `--photo` exists will sometimes declare it as well — once
     as `--photo: var(--photo)`, which is self-referential, which CSS treats as
     invalid, which leaves the poster with a photograph embedded in it and
     nothing on screen. That is a real poster this happened to.
 
-    So any declaration already there is removed first, ours is appended at the
-    end of the block, and there is exactly one.
+    So any declaration already there is removed first, ours are appended at the
+    end of the block, and there is exactly one of each.
     """
-    declaration = f'  {_VARIABLE}: url("{photo.data_uri}");\n'
+    if not photos:
+        return document
+
+    declarations = "".join(
+        f'  {variable_for(index)}: url("{photo.data_uri}");\n'
+        for index, photo in enumerate(photos)
+    )
 
     root = _ROOT_BLOCK.search(document)
     if root is not None:
         cleaned = _ANY_DECLARATION.sub("", root.group(2))
-        block = f"{root.group(1)}{cleaned}{declaration}{root.group(3)}"
+        block = f"{root.group(1)}{cleaned}{declarations}{root.group(3)}"
         return document[: root.start()] + block + document[root.end() :]
 
     # No :root to extend. Give it one, immediately inside the stylesheet.
@@ -242,13 +278,37 @@ def attach_photo(document: str, photo: Photo) -> str:
     at = re.search(r"<style[^>]*>", without, re.IGNORECASE)
     if at is None:  # pragma: no cover - the tag was just found
         return document
-    return without[: at.end()] + f"\n:root {{\n{declaration}}}\n" + without[at.end() :]
+    return without[: at.end()] + f"\n:root {{\n{declarations}}}\n" + without[at.end() :]
+
+
+def attach_photo(document: str, photo: Photo) -> str:
+    """One picture, which is the common case."""
+    return attach_photos(document, [photo])
 
 
 # The declaration `attach_photo` writes, so it can be taken back out again.
 _DECLARATION = re.compile(
-    r'\s*' + re.escape(_VARIABLE) + r'\s*:\s*url\(\s*"(data:[^"]+)"\s*\)\s*;', re.IGNORECASE
+    r'\s*' + re.escape(_VARIABLE) + r'(?:-\d+)?\s*:\s*url\(\s*"(data:[^"]+)"\s*\)\s*;',
+    re.IGNORECASE,
 )
+
+
+def detach_photos(document: str) -> tuple[str, list[str]]:
+    """The document without its pictures, and the pictures.
+
+    Every model round-trip after the first sends the document back, and a
+    base64 image in it costs more than everything else in the request put
+    together. So they come out, the model works on the rest, and they go back.
+    """
+    uris = [match.group(1) for match in _DECLARATION.finditer(document)]
+    return (_DECLARATION.sub("", document) if uris else document), uris
+
+
+def reattach_all(document: str, data_uris: Sequence[str]) -> str:
+    return attach_photos(
+        document,
+        [Photo(data_uri=uri, source="", width=0, height=0) for uri in data_uris],
+    )
 
 
 def detach_photo(document: str) -> tuple[str, str]:
@@ -307,28 +367,38 @@ WANTS_A_PICTURE = re.compile(
 )
 
 
-def photo_brief(photo: Photo) -> str:
+def photo_brief(photos: Sequence[Photo]) -> str:
     """What the composing model is told. Never the bytes."""
+    if not photos:
+        return ""
+
+    named = "\n".join(
+        f"  `var({variable_for(index)})` — {photo.width}x{photo.height}"
+        for index, photo in enumerate(photos)
+    )
+    several = len(photos) > 1
     return (
-        "A photograph has been found for this poster and is already available "
-        f"as the CSS variable `{_VARIABLE}`, holding a url() of a "
-        f"{photo.width}x{photo.height} image.\n"
-        f"Use it with `background-image: var({_VARIABLE})`, with "
-        "`background-size: cover` and `background-position: center`. If the "
-        "brief asks for it in the background, it covers the whole canvas "
-        "behind everything else — not a band, not a panel, not a corner.\n"
-        f"Do NOT declare `{_VARIABLE}` yourself. It is already declared. "
-        f"Writing `{_VARIABLE}: var({_VARIABLE})` in `:root`, which is the "
-        "tempting thing to do, is self-referential, and CSS discards it — the "
-        "poster then has a photograph inside it and nothing on screen.\n"
-        "It is a photograph, so put a scrim over it — a gradient or a flat "
-        "colour at partial opacity drawn from the palette — and set every word "
-        "above it in a colour that clears 4.5:1 against the darkest part of "
-        "the picture. Text laid straight onto a photograph is unreadable in "
-        "half of it.\n"
-        f"Write `var({_VARIABLE})` and nothing else. Do not write a URL - not "
-        "an unsplash.com one, not a picsum one, not any other; you are not "
-        "able to know that one exists, and one you write points at nothing or "
-        f"at something else entirely. `var({_VARIABLE})` is the only image "
-        "there is."
+        f"{'Photographs have' if several else 'A photograph has'} been found for "
+        f"this poster and {'are' if several else 'is'} already available as CSS "
+        f"{'variables' if several else 'a variable'} holding a url() of the image:\n"
+        f"{named}\n"
+        "Use one with `background-image: var(--photo)`, `background-size: cover` "
+        "and `background-position: center`. If the brief asks for a picture in "
+        "the background, it covers the whole canvas behind everything else — "
+        "not a band, not a panel, not a corner.\n"
+        + (
+            "Use every one of them. They were found because the brief asked for "
+            "more than one, so a strip, a grid or a row of cards is what they are "
+            "for.\n"
+            if several
+            else ""
+        )
+        + "Do NOT declare these variables yourself. They are already declared. "
+        "Writing `--photo: var(--photo)` in `:root`, which is the tempting thing "
+        "to do, is self-referential, and CSS discards it — the poster then has a "
+        "photograph inside it and nothing on screen.\n"
+        "Write the variable and nothing else. Do not write a URL — not an "
+        "unsplash.com one, not a picsum one, not any other; you are not able to "
+        "know that one exists, and one you write points at nothing or at "
+        "something else entirely."
     )

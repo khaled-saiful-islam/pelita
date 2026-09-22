@@ -42,7 +42,7 @@ class CreateArtifactTool:
 
     name = "create_artifact"
     presentation = ToolPresentation(
-        running="Designing", done="Designed", noun="artifact"
+        running="Designing", done="Designed", noun="artifact", failed="Could not design it"
     )
 
     def __init__(self, kinds: dict[str, ArtifactKind], *, language: str | None = None) -> None:
@@ -159,7 +159,9 @@ class EditArtifactTool:
         "or a wrong number; they can edit words directly on it, which is "
         "instant, and you should tell them so instead."
     )
-    presentation = ToolPresentation(running="Redrawing", done="Redrawn", noun="change")
+    presentation = ToolPresentation(
+        running="Redrawing", done="Redrawn", noun="change", failed="Could not make that change"
+    )
     # Read by the chat service, which offers this only when a turn has an
     # artifact open and hands it in.
     wants_open_artifact = True

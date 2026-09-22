@@ -505,7 +505,10 @@ class ChatService:
             # model answers from what it knows and the UI says what was missed.
             logger.info("tool %s unavailable: %s", tool.name, exc)
             yield ToolEvent(
-                tool=tool.name, status="failed", label="Search unavailable", detail=str(exc)
+                tool=tool.name,
+                status="failed",
+                label=tool.presentation.failed,
+                detail=str(exc),
             )
             if sink is not None:
                 sink.append(f"The {tool.name} tool is unavailable: {exc}")

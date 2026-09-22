@@ -19,7 +19,7 @@ The words live in `poster_prompts.py`; this file is the machinery.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from time import perf_counter
 
@@ -35,15 +35,15 @@ from app.artifacts.base import (
     SandboxPolicy,
     Step,
     Swatch,
+    read_queries,
 )
 from app.artifacts.imagery import (
     WANTS_A_PICTURE,
     Photo,
-    attach_photo,
-    detach_photo,
-    find_photo,
+    attach_photos,
+    detach_photos,
+    find_photos,
     photo_brief,
-    reattach,
     use_the_real_photograph,
 )
 from app.artifacts.model import ArtifactModel, Written
@@ -127,21 +127,29 @@ class PosterKind:
         spec = await self._direct(context)
         yield Step(label="Chose a direction", detail=_direction_summary(spec))
 
-        photo = None
-        if spec.image_query and self._search is not None:
-            yield Step(label="Finding a photograph", detail=spec.image_query)
-            photo = await find_photo(self._search, spec.image_query)
-            if photo is None:
+        photos: list[Photo] = []
+        if spec.image_queries and self._search is not None:
+            yield Step(
+                label="Finding a photograph"
+                if len(spec.image_queries) == 1
+                else f"Finding {len(spec.image_queries)} photographs",
+                detail=spec.image_queries[0],
+            )
+            photos = await find_photos(self._search, spec.image_queries)
+            if not photos:
                 # Not an error. A poster without the photograph it hoped for is
                 # still a poster, and the model is simply not told about one.
                 yield Step(label="No photograph fitted", detail="designing without one")
             else:
-                spec = replace(spec, image_source=photo.source)
-                yield Step(label="Found a photograph", detail=f"{photo.width}x{photo.height}")
+                spec = replace(spec, image_source=photos[0].source)
+                yield Step(
+                    label=f"Found {len(photos)} photograph{'' if len(photos) == 1 else 's'}",
+                    detail=f"{photos[0].width}x{photos[0].height}",
+                )
 
         written = Written()
         async for update in self._write(
-            self._compose_system(spec, photo=photo), context, written, label="Composing"
+            self._compose_system(spec, photos=photos), context, written, label="Composing"
         ):
             yield update
 
@@ -152,7 +160,7 @@ class PosterKind:
         # because a base64 image costs more tokens than the entire poster and
         # a repair pass that carried one would pay for it twice.
         def finished(document: str) -> str:
-            if photo is None:
+            if not photos:
                 return document
             # A model told a variable holds the picture will still sometimes
             # write a stock URL of its own. Pointing it at the photograph we
@@ -160,7 +168,7 @@ class PosterKind:
             corrected, swapped = use_the_real_photograph(document)
             if swapped:
                 logger.info("redirected %d invented image url(s) to the real one", swapped)
-            return attach_photo(corrected, photo)
+            return attach_photos(corrected, photos)
 
         yield Step(label="Checking it fits")
         findings = self._check(finished(html), spec)
@@ -270,15 +278,15 @@ class PosterKind:
         # Out before the model sees it, back in afterwards. A base64
         # photograph in the document costs more than every other part of this
         # request put together.
-        plain, existing = detach_photo(html)
+        plain, existing = detach_photos(html)
 
-        photo: Photo | None = None
-        if not existing and self._search is not None and WANTS_A_PICTURE.search(instruction):
-            query = await self._image_query(instruction, spec)
-            if query:
-                yield Step(label="Finding a photograph", detail=query)
-                photo = await find_photo(self._search, query)
-                if photo is None:
+        photos: list[Photo] = []
+        if self._search is not None and WANTS_A_PICTURE.search(instruction):
+            queries = await self._image_queries(instruction, spec)
+            if queries:
+                yield Step(label="Finding pictures", detail=queries[0])
+                photos = await find_photos(self._search, queries)
+                if not photos:
                     yield Step(label="No photograph fitted", detail="changing without one")
 
         written = Written()
@@ -286,15 +294,14 @@ class PosterKind:
             f'<user_context type="change">{instruction}</user_context>\n\n'
             f"THE POSTER AS IT STANDS:\n\n{plain}"
         )
+        # Anything newly found joins whatever the poster already had, so
+        # "add one more" adds one rather than replacing the lot.
+        kept = [Photo(data_uri=uri, source="", width=0, height=0) for uri in existing]
+        available = kept + photos
+
         system = f"{REVISE_SYSTEM}\n{self._direction_block(spec)}"
-        if photo is not None:
-            system = f"{system}\n\nTHE PHOTOGRAPH\n{photo_brief(photo)}"
-        elif existing:
-            system = (
-                f"{system}\n\nTHE PHOTOGRAPH\nThis poster already uses a photograph, held "
-                "in the CSS variable `--photo`. Keep using `var(--photo)` unless the change "
-                "asks for it to go. Never write an image URL yourself."
-            )
+        if available:
+            system = f"{system}\n\nTHE PICTURES\n{photo_brief(available)}"
 
         async for update in self._write(
             system, request, written, label="Redrawing", temperature=0.2
@@ -302,15 +309,11 @@ class PosterKind:
             yield update
 
         revised, usage = written.text, written.usage
-        if photo is not None or existing:
+        if available:
             corrected, swapped = use_the_real_photograph(revised)
             if swapped:
                 logger.info("redirected %d invented image url(s) to the real one", swapped)
-            revised = corrected
-        if photo is not None:
-            revised = attach_photo(revised, photo)
-        elif existing:
-            revised = reattach(revised, existing)
+            revised = attach_photos(corrected, available)
 
         yield Step(label="Checking it fits")
         findings = self._check(revised, spec)
@@ -334,7 +337,7 @@ class PosterKind:
             )
         )
 
-    async def _image_query(self, instruction: str, spec: DesignSpec) -> str:
+    async def _image_queries(self, instruction: str, spec: DesignSpec) -> tuple[str, ...]:
         """What to search for, when a change sounds like it wants a picture.
 
         A second, small call rather than a keyword lifted out of the sentence:
@@ -346,18 +349,18 @@ class PosterKind:
             f'<user_context type="poster">{spec.movement}. {spec.layout} '
             f"{spec.motif} {spec.reference}</user_context>"
         )
-        answered = await self._model.decide(IMAGE_QUERY_SYSTEM, asked, max_tokens=200)
-        return str(answered.get("image_query") or "").strip()[:200]
+        answered = await self._model.decide(IMAGE_QUERY_SYSTEM, asked, max_tokens=300)
+        return read_queries(answered)
 
     async def _direct(self, context: str) -> DesignSpec:
         raw = await self._model.decide(DIRECTION_SYSTEM, context)
         spec = DesignSpec.from_dict(raw)
         return _with_fallbacks(spec)
 
-    def _compose_system(self, spec: DesignSpec, *, photo: Photo | None = None) -> str:
+    def _compose_system(self, spec: DesignSpec, *, photos: Sequence[Photo] = ()) -> str:
         parts = [COMPOSE_SYSTEM, self._direction_block(spec)]
-        if photo is not None:
-            parts.append(f"\nTHE PHOTOGRAPH\n{photo_brief(photo)}")
+        if photos:
+            parts.append(f"\nTHE PICTURES\n{photo_brief(photos)}")
         return "\n".join(parts)
 
     def _direction_block(self, spec: DesignSpec) -> str:
