@@ -21,6 +21,7 @@ from app.artifacts.base import (
     Brief,
     Chunk,
     Finished,
+    OpenArtifact,
     Step,
 )
 from app.tools.base import (
@@ -136,6 +137,84 @@ class CreateArtifactTool:
 
     async def run(self, **kwargs: Any) -> list[Any]:
         """Nothing to cite. An artifact is shown, not referenced."""
+        async for _ in self.stream(**kwargs):
+            pass
+        return []
+
+
+class EditArtifactTool:
+    """Changing the artifact the person is looking at.
+
+    Offered only when there is one. That is what lets somebody type "make it
+    warmer" into the same box they type everything else into, and have it mean
+    the poster on screen rather than a new poster about warmth.
+    """
+
+    name = "edit_artifact"
+    description = (
+        "Change the artifact the person is currently looking at: its colours, "
+        "its layout, its type, how much of something there is. Use this "
+        "whenever they ask for a change and an artifact is open - never make a "
+        "new one for a change to an existing one. Do not use it to fix a typo "
+        "or a wrong number; they can edit words directly on it, which is "
+        "instant, and you should tell them so instead."
+    )
+    presentation = ToolPresentation(running="Redrawing", done="Redrawn", noun="change")
+    # Read by the chat service, which offers this only when a turn has an
+    # artifact open and hands it in.
+    wants_open_artifact = True
+
+    parameters = {
+        "type": "object",
+        "properties": {
+            "instruction": {
+                "type": "string",
+                "description": (
+                    "The change, in the person's own terms and no wider than "
+                    "they asked. Everything they did not mention stays as it is."
+                ),
+            }
+        },
+        "required": ["instruction"],
+    }
+
+    def __init__(self, kinds: dict[str, ArtifactKind]) -> None:
+        self._kinds = kinds
+
+    async def stream(self, **kwargs: Any) -> AsyncIterator[ToolUpdate]:
+        open_artifact: OpenArtifact | None = kwargs.get("open_artifact")
+        instruction = str(kwargs.get("instruction") or "").strip()
+        if open_artifact is None:
+            raise ToolUnavailable("There is nothing open to change.")
+        if not instruction:
+            raise ToolUnavailable("No change was described.")
+
+        kind = self._kinds.get(open_artifact.kind)
+        if kind is None or not hasattr(kind, "revise"):
+            raise ToolUnavailable(f"A {open_artifact.kind} cannot be changed this way.")
+
+        yield Making(kind=open_artifact.kind, title=open_artifact.title)
+        try:
+            async for update in kind.revise(
+                html=open_artifact.html,
+                spec=open_artifact.spec,
+                instruction=instruction,
+            ):
+                if isinstance(update, Step):
+                    yield Progress(label=update.label, detail=update.detail)
+                elif isinstance(update, Chunk):
+                    yield Drafting(text=update.text)
+                elif isinstance(update, Finished):
+                    yield Made(
+                        kind=open_artifact.kind,
+                        title=open_artifact.title,
+                        built=update.built,
+                        replaces=open_artifact.id,
+                    )
+        except ArtifactUnavailable as exc:
+            raise ToolUnavailable(str(exc)) from exc
+
+    async def run(self, **kwargs: Any) -> list[Any]:
         async for _ in self.stream(**kwargs):
             pass
         return []

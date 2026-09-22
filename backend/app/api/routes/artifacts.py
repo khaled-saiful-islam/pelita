@@ -128,17 +128,15 @@ async def edit_text(
     new version, because an edit that overwrites what it replaced cannot be
     undone.
     """
-    repo = SqlArtifactRepository(session)
     artifact, current = await _load(session, artifact_id, user.id)
 
     edited = apply_text(current.html, {c.index: c.text for c in payload.changes})
     if edited != current.html:
-        await repo.add_version(
-            artifact,
-            html=edited,
-            design_spec=current.design_spec,
-            model=current.model,
-        )
+        # Corrected in place rather than versioned. Fixing a typo is not a new
+        # draft of the poster, and a version list where every entry differs by
+        # one character is a version list nobody reads.
+        current.html = edited
+        current.size_bytes = len(edited.encode())
         await session.commit()
 
     return await read(artifact_id, session, user, settings)

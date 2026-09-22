@@ -135,3 +135,19 @@ function safeParse(data: string): Record<string, unknown> | null {
     return null
   }
 }
+
+
+/**
+ * Add a build step, replacing the one before it when it is the same phase.
+ *
+ * A long call reports its progress under the same label several times. Those
+ * are one step getting further along, not several steps.
+ */
+export function mergeStep(
+  steps: { label: string; detail: string }[],
+  next: { label: string; detail: string },
+): { label: string; detail: string }[] {
+  const last = steps[steps.length - 1]
+  if (last && last.label === next.label) return [...steps.slice(0, -1), next]
+  return [...steps, next]
+}

@@ -199,6 +199,7 @@ async def stream(
                 content=payload.content,
                 regenerate_of=payload.regenerate_of,
                 search_mode=payload.search_mode,
+                artifact_id=payload.artifact_id,
             ):
                 frame = _to_sse(event)
                 if frame is not None:

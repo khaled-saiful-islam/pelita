@@ -31,6 +31,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.artifacts.base import DesignSpec, OpenArtifact
 from app.context.base import (
     AttachedDocument,
     ContextContributor,
@@ -87,6 +88,7 @@ from app.services.memory_service import MemoryService
 from app.services.search_intent import SearchDecision, decide
 from app.services.suggestion_service import suggest
 from app.tools.base import (
+    ArtifactAwareTool,
     Drafting,
     Made,
     Making,
@@ -149,6 +151,9 @@ class TurnState:
     conversation_id: UUID | None = None
     user_id: UUID | None = None
     assistant_id: UUID | None = None
+    # What the person is looking at while they type. Without it, "make it
+    # warmer" has no subject.
+    open_artifact: OpenArtifact | None = None
     history: tuple[StoredMessage, ...] = ()
     language: str | None = None
     tool_results: tuple[ToolResult, ...] = ()
@@ -267,6 +272,7 @@ class ChatService:
         content: str = "",
         regenerate_of: UUID | None = None,
         search_mode: str = "auto",
+        artifact_id: UUID | None = None,
     ) -> AsyncIterator[ChatEvent]:
         start, state = await self._open(user_id, conversation_id, content, regenerate_of)
         # Where this turn is happening, so anything it makes can be stored
@@ -274,6 +280,7 @@ class ChatService:
         state.conversation_id = start.conversation_id
         state.user_id = user_id
         state.assistant_id = start.assistant_message_id
+        state.open_artifact = await self._open_artifact(artifact_id, user_id)
         yield start
 
         assistant_id = start.assistant_message_id
@@ -357,7 +364,7 @@ class ChatService:
         if search_mode == "off":
             return
 
-        state.offered = self._tools_to_offer()
+        state.offered = self._tools_to_offer(state)
         if state.offered:
             state.force_tool = search_mode == "always"
             return
@@ -374,7 +381,37 @@ class ChatService:
         ):
             yield event
 
-    def _tools_to_offer(self) -> dict[str, Tool]:
+    async def _open_artifact(
+        self, artifact_id: UUID | None, user_id: UUID
+    ) -> OpenArtifact | None:
+        """Whatever the panel is showing, if anything.
+
+        Wrapped: an artifact that cannot be loaded costs the turn its subject,
+        not the turn itself.
+        """
+        if artifact_id is None:
+            return None
+        try:
+            async with self._session_maker() as session:
+                repo = SqlArtifactRepository(session)
+                artifact = await repo.get(artifact_id, user_id)
+                if artifact is None:
+                    return None
+                current = await repo.version(artifact)
+                if current is None:
+                    return None
+                return OpenArtifact(
+                    id=artifact.id,
+                    kind=artifact.kind,
+                    title=artifact.title,
+                    html=current.html,
+                    spec=DesignSpec.from_dict(current.design_spec or {}),
+                )
+        except Exception:  # noqa: BLE001 - a missing subject is not a failed turn
+            logger.exception("could not load the open artifact %s", artifact_id)
+            return None
+
+    def _tools_to_offer(self, state: TurnState) -> dict[str, Tool]:
         """The tools this turn hands the model, or nothing.
 
         Nothing means the turn falls back to `_select_tool` — which keeps search
@@ -388,7 +425,14 @@ class ChatService:
         # Re-keyed by the tool's own name, which is what the schema advertises
         # and therefore what the model calls back with. The registry's key is
         # usually the same string, but dispatch must not depend on that.
-        return {tool.name: tool for tool in self._tools.values()}
+        #
+        # A tool that acts on the open artifact is withheld when there is none.
+        # Offering a way to change nothing invites the model to try.
+        return {
+            tool.name: tool
+            for tool in self._tools.values()
+            if state.open_artifact is not None or not _needs_open_artifact(tool)
+        }
 
     def _select_tool(self, decision: SearchDecision) -> Tool | None:
         """Choosing a tool from the question, for providers that cannot choose.
@@ -491,6 +535,38 @@ class ChatService:
         built = made.built
         async with self._session_maker() as session:
             repo = SqlArtifactRepository(session)
+            if made.replaces is not None:
+                # A change to something that exists is its next version, not a
+                # second artifact competing for the same panel.
+                existing = await repo.get(made.replaces, state.user_id)
+                if existing is not None:
+                    version = await repo.add_version(
+                        existing,
+                        html=built.html,
+                        design_spec=built.spec.as_dict(),
+                        model=built.model,
+                        prompt_tokens=built.prompt_tokens,
+                        completion_tokens=built.completion_tokens,
+                        build_ms=built.build_ms,
+                    )
+                    await session.commit()
+                    yield ArtifactDoneEvent(
+                        artifact_id=existing.id,
+                        kind=made.kind,
+                        title=made.title,
+                        version=version.version,
+                        size_bytes=len(built.html.encode()),
+                        width=built.spec.width,
+                        height=built.spec.height,
+                        findings=built.findings,
+                    )
+                    if sink is not None:
+                        sink.append(
+                            f"The {made.kind} has been changed and the new version is on "
+                            "screen. Say in one line what changed. Do not describe the markup."
+                        )
+                    return
+
             artifact = await repo.create(
                 conversation_id=state.conversation_id,
                 user_id=state.user_id,
@@ -720,11 +796,18 @@ class ChatService:
                 self._answer_call(state, call, f"Missing required argument: {named}.")
                 continue
 
+            said = _asked_for(bound)
+            if _needs_open_artifact(tool) and state.open_artifact is not None:
+                # Handed in rather than looked up: the tool asks for the open
+                # artifact by declaring it wants one, and never learns how to
+                # find it.
+                bound["open_artifact"] = state.open_artifact
+
             sink: list[str] = []
             # `detail` is what the model chose to look up, which tells the user
             # more than a regex's reason ever did.
             async for event in self._run_tool(
-                tool, state, arguments=bound, detail=_asked_for(bound), sink=sink
+                tool, state, arguments=bound, detail=said, sink=sink
             ):
                 yield event
             self._answer_call(state, call, "\n\n".join(sink))
@@ -1089,6 +1172,11 @@ async def _updates(tool: Tool, arguments: dict[str, Any]) -> AsyncIterator[ToolU
             yield update
         return
     yield Results(items=tuple(await tool.run(**arguments)))
+
+
+def _needs_open_artifact(tool: Tool) -> bool:
+    """Decided by shape, never by name — the same rule as everything else."""
+    return isinstance(tool, ArtifactAwareTool) and bool(tool.wants_open_artifact)
 
 
 def _asked_for(bound: dict[str, Any]) -> str:

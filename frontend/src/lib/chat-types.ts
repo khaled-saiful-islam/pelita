@@ -173,4 +173,6 @@ export interface StreamBody {
   content?: string
   regenerate_of?: string
   search_mode?: SearchMode
+  /** What the panel is showing. It is what "make it warmer" refers to. */
+  artifact_id?: string | null
 }

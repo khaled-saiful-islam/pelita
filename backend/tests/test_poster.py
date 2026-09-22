@@ -152,6 +152,20 @@ async def build(kind: PosterKind, brief: Brief = BRIEF):
     return [update async for update in kind.build(brief)]
 
 
+def phases(updates) -> list[str]:
+    """The steps that happened, without the repeats.
+
+    A long call reports its progress under the same label several times, so
+    what a test cares about is the sequence of phases rather than the number of
+    reassurances.
+    """
+    named: list[str] = []
+    for update in updates:
+        if isinstance(update, Step) and (not named or named[-1] != update.label):
+            named.append(update.label)
+    return named
+
+
 # --- the pipeline -------------------------------------------------------
 
 
@@ -159,9 +173,9 @@ async def test_a_poster_is_directed_then_composed_then_refined() -> None:
     provider = FakeArtifactProvider()
     updates = await build(poster_for(provider))
 
-    steps = [u.label for u in updates if isinstance(u, Step)]
-    assert steps == [
+    assert phases(updates) == [
         "Reading the brief",
+        "Choosing a direction",
         "Chose a direction",
         "Composing",
         "Checking it fits",
@@ -222,8 +236,9 @@ async def test_refinement_can_be_switched_off() -> None:
     provider = FakeArtifactProvider()
     updates = await build(poster_for(provider, refine=False))
 
-    assert [u.label for u in updates if isinstance(u, Step)] == [
+    assert phases(updates) == [
         "Reading the brief",
+        "Choosing a direction",
         "Chose a direction",
         "Composing",
         "Checking it fits",
@@ -426,4 +441,14 @@ async def test_a_revision_that_comes_back_broken_is_refused() -> None:
 
 async def test_a_revision_reports_what_it_is_doing() -> None:
     updates = await revise(poster_for(FakeArtifactProvider()))
-    assert [u.label for u in updates if isinstance(u, Step)] == ["Redrawing", "Checking it fits"]
+    assert phases(updates) == ["Redrawing", "Checking it fits"]
+
+
+async def test_a_long_call_says_how_much_it_has_written() -> None:
+    """A minute of silence is indistinguishable from a hang."""
+    updates = await build(poster_for(FakeArtifactProvider(), refine=False))
+    composing = [u for u in updates if isinstance(u, Step) and u.label == "Composing"]
+
+    assert len(composing) > 1
+    assert composing[0].detail == ""
+    assert "KB in" in composing[-1].detail

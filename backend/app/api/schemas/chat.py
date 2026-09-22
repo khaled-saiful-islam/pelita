@@ -22,6 +22,9 @@ class SendMessageRequest(BaseModel):
     # off   — never search
     # Ignored entirely when SERPAPI_KEY is unset.
     search_mode: Literal["auto", "always", "off"] = "auto"
+    # The artifact the panel is showing, if any. It is what "make it warmer"
+    # refers to, and without it that sentence has no subject.
+    artifact_id: UUID | None = None
 
 
 class FeedbackRequest(BaseModel):

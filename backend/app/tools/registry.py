@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from app.artifacts.registry import build_kinds
 from app.core.config import Settings, get_settings
-from app.tools.artifact import CreateArtifactTool
+from app.tools.artifact import CreateArtifactTool, EditArtifactTool
 from app.tools.base import Tool
 from app.tools.serpapi import SerpApiSearch
 from app.tools.web_search import ImageSearchTool, WebSearchTool
@@ -42,5 +42,8 @@ def build_tools(settings: Settings | None = None) -> dict[str, Tool]:
     kinds = build_kinds(settings)
     if kinds:
         tools.append(CreateArtifactTool(kinds))
+        # Offered only on a turn that has one open. `_tools_to_offer` decides
+        # that, so the model is never shown a way to change nothing.
+        tools.append(EditArtifactTool(kinds))
 
     return {tool.name: tool for tool in tools}

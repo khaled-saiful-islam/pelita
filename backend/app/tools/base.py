@@ -109,9 +109,24 @@ class Made:
     kind: str
     title: str
     built: Built
+    # Set when this replaces something that already exists, in which case it is
+    # the next version of it rather than a new artifact.
+    replaces: Any | None = None
 
 
 ToolUpdate = Progress | Results | Making | Drafting | Made
+
+
+@runtime_checkable
+class ArtifactAwareTool(Protocol):
+    """A tool that acts on whatever the person is currently looking at.
+
+    Declared, not named: the service offers these only when there is an open
+    artifact and hands it in, so "make it warmer" has a subject. A tool that
+    does not declare this never learns an artifact exists.
+    """
+
+    wants_open_artifact: bool
 
 
 @runtime_checkable

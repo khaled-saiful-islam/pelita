@@ -193,6 +193,21 @@ def _as_int(value: Any) -> int:
 
 
 @dataclass(frozen=True, slots=True)
+class OpenArtifact:
+    """The artifact the person is looking at while they type.
+
+    Carried on the turn so "make it warmer" means the poster on screen rather
+    than a new one. Without it that sentence has no subject.
+    """
+
+    id: Any
+    kind: str
+    title: str
+    html: str
+    spec: DesignSpec
+
+
+@dataclass(frozen=True, slots=True)
 class Built:
     """A finished document and what it cost to make."""
 

@@ -28,10 +28,22 @@ export function useArtifact(artifactId: string | null) {
       const query = version ? `?version=${version}` : ''
       const detail = await apiFetch<ArtifactDetail>(`/artifacts/${id}${query}`)
       setArtifact(detail)
-      setFit(await checkFit(detail.html))
+      setLoading(false)
+
+      // Measured alongside, not before. Waiting for fonts to load inside a
+      // throwaway frame takes seconds, and a panel that shows nothing for
+      // five of them looks broken — which is a worse failure than the one the
+      // measurement is looking for, and a far more common one.
+      void checkFit(detail.html).then((result) => {
+        // Still the same artifact? A fast click through two of them would
+        // otherwise pin the first one's verdict onto the second.
+        setArtifact((current) => {
+          if (current?.id === detail.id && current.version === detail.version) setFit(result)
+          return current
+        })
+      })
     } catch (cause) {
       setError((cause as Error).message)
-    } finally {
       setLoading(false)
     }
   }, [])

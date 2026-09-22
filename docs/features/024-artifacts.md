@@ -94,9 +94,18 @@ disagreeing.
 
 | change | how | cost |
 |---|---|---|
-| a word is wrong | edit it in place, in the frame | no model call, instant |
-| the design | one composing call from the direction it already has | ~40s |
-| a different idea | ask in chat for a new one | a full build |
+| a word is wrong | the pencil: edit it on the poster | no model call, instant, no new version |
+| the design | say so in the chat box | ~40s, a new version |
+| a different idea | ask for a new one | a full build |
+
+Design changes go through the same chat box as everything else. The message
+carries whichever artifact the panel is showing, and `edit_artifact` is offered
+only on a turn that has one — so "make it warmer" means the poster on screen
+rather than a new poster about warmth, and the model is never shown a way to
+change nothing.
+
+Fixing a word corrects the current version in place. A version list where every
+entry differs by one character is a version list nobody reads.
 
 Editing words needs a script, and a poster renders with scripts disabled. Edit
 mode re-renders the frame with `allow-scripts` and one script that **we**
@@ -159,6 +168,8 @@ documented failure of every implementation that has tried it.
   document that prints well, not a press-ready file.
 - **The preview is not progressive.** The first look at the poster is the
   finished one; only the source streams.
+- **The fit measurement lands a few seconds after the poster does.** It waits
+  for fonts, so a poster that does not fit is shown before it is flagged.
 - **The design prompt is English-only**, in line with the other pattern layers.
   The poster's own words follow the conversation's language.
 - **No queue.** A second concurrent build on one worker competes for the same

@@ -12,6 +12,8 @@ import { AttachmentError } from '@/components/chat/AttachmentError'
 import { Suggestions } from '@/components/chat/Suggestions'
 import { ShareDialog } from '@/components/chat/ShareDialog'
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel'
+import { PanelHandle } from '@/components/artifacts/PanelHandle'
+import { usePanelWidth } from '@/hooks/usePanelWidth'
 import { useChat } from '@/hooks/useChat'
 import { useConversations } from '@/hooks/useConversations'
 import { useConfig } from '@/hooks/useConfig'
@@ -93,6 +95,7 @@ export default function Chat() {
   // there is an artifact to show.
   const building = chat.messages[chat.messages.length - 1]?.building ?? null
   const panelOpen = !!chat.openArtifact || !!building
+  const panel = usePanelWidth()
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -195,6 +198,8 @@ export default function Chat() {
           onSend={(text, options) =>
             chat.send(text, {
               searchMode: options.searchMode,
+              // What is on screen, so "make it warmer" has a subject.
+              artifactId: chat.openArtifact,
               // The pending files become cards on this message, and leave the
               // composer — the server binds them to the same id.
               documents: documents.pending,
@@ -217,11 +222,23 @@ export default function Chat() {
       </main>
 
       {panelOpen && (
-        <ArtifactPanel
-          artifactId={chat.openArtifact}
-          build={building}
-          onClose={() => chat.setOpenArtifact(null)}
-        />
+        <>
+          <PanelHandle
+            dragging={panel.dragging}
+            onStart={panel.startDragging}
+            onReset={panel.reset}
+          />
+          <div
+            className="flex shrink-0 border-l border-border"
+            style={{ width: panel.width }}
+          >
+            <ArtifactPanel
+              artifactId={chat.openArtifact}
+              build={building}
+              onClose={() => chat.setOpenArtifact(null)}
+            />
+          </div>
+        </>
       )}
 
       {sharing && activeConversationId && (

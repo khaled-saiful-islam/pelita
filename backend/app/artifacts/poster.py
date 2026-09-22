@@ -101,13 +101,17 @@ class PosterKind:
 
         yield Step(label="Reading the brief", detail=brief.title)
 
+        # Said before the call, not after it. Seven seconds of silence under a
+        # step that has already finished reads as a hang.
+        yield Step(label="Choosing a direction", detail="palette, type and shape")
         spec = await self._direct(context)
         yield Step(label="Chose a direction", detail=_direction_summary(spec))
 
-        yield Step(label="Composing")
         written = Written()
-        async for piece in self._model.write(self._compose_system(spec), context, written):
-            yield Chunk(text=piece)
+        async for update in self._write(
+            self._compose_system(spec), context, written, label="Composing"
+        ):
+            yield update
 
         html, usage = written.text, written.usage
 
@@ -131,10 +135,15 @@ class PosterKind:
         if self._refine:
             yield Step(label="Refining")
             polished = Written()
-            async for _ in self._model.write(
-                REFINE_SYSTEM, _refine_request(context, html), polished, temperature=0.2
+            async for update in self._write(
+                REFINE_SYSTEM,
+                _refine_request(context, html),
+                polished,
+                label="Refining",
+                temperature=0.2,
+                stream_document=False,
             ):
-                pass
+                yield update
             # A refinement that came back empty or truncated is not an
             # improvement. The composed document is already good.
             # Kept only if it is whole and did not break anything the
@@ -159,6 +168,37 @@ class PosterKind:
             )
         )
 
+    async def _write(
+        self,
+        system: str,
+        user: str,
+        into: Written,
+        *,
+        label: str,
+        temperature: float | None = None,
+        stream_document: bool = True,
+    ) -> AsyncIterator[BuildUpdate]:
+        """One long call, narrated.
+
+        A minute of silence is indistinguishable from a hang, so the step
+        reports how much has been written as it arrives. Throttled to about
+        twice a second: this is reassurance, not telemetry, and a step that
+        changes on every token is a flicker.
+        """
+        written = 0
+        last_said = 0.0
+        started = perf_counter()
+        yield Step(label=label, detail="")
+
+        async for piece in self._model.write(system, user, into, temperature=temperature):
+            written += len(piece)
+            if stream_document:
+                yield Chunk(text=piece)
+            now = perf_counter()
+            if now - last_said >= 0.5:
+                last_said = now
+                yield Step(label=label, detail=_written_so_far(written, now - started))
+
     def _check(self, document: str, spec: DesignSpec) -> tuple[Finding, ...]:
         return check(
             document, spec=spec, sandbox=self.sandbox, max_bytes=self._max_bytes
@@ -175,17 +215,19 @@ class PosterKind:
         already looking at the result and can ask again.
         """
         started = perf_counter()
-        yield Step(label="Redrawing", detail=instruction[:80])
-
         written = Written()
         request = (
             f'<user_context type="change">{instruction}</user_context>\n\n'
             f"THE POSTER AS IT STANDS:\n\n{html}"
         )
-        async for piece in self._model.write(
-            f"{REVISE_SYSTEM}\n{self._direction_block(spec)}", request, written, temperature=0.2
+        async for update in self._write(
+            f"{REVISE_SYSTEM}\n{self._direction_block(spec)}",
+            request,
+            written,
+            label="Redrawing",
+            temperature=0.2,
         ):
-            yield Chunk(text=piece)
+            yield update
 
         revised, usage = written.text, written.usage
         yield Step(label="Checking it fits")
@@ -241,6 +283,11 @@ class PosterKind:
 
 def _refine_request(context: str, html: str) -> str:
     return f"{context}\n\nTHE POSTER AS IT STANDS:\n\n{html}"
+
+
+def _written_so_far(characters: int, seconds: float) -> str:
+    """"4.2 KB in 18s". The number moving is the point; its precision is not."""
+    return f"{characters / 1024:.1f} KB in {seconds:.0f}s"
 
 
 def _direction_summary(spec: DesignSpec) -> str:

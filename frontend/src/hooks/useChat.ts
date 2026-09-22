@@ -9,7 +9,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 import { readSse } from '@/lib/sse'
-import { addUsage, dispatchFrame, mergeSources, mergeTool } from '@/lib/chat-events'
+import { addUsage, dispatchFrame, mergeSources, mergeStep, mergeTool } from '@/lib/chat-events'
 import { splitStoredSources } from '@/lib/messages'
 import type {
   Artifact,
@@ -46,6 +46,8 @@ export type {
 
 export interface SendOptions {
   searchMode?: SearchMode
+  /** The artifact on screen, so a change refers to it rather than to nothing. */
+  artifactId?: string | null
   /** Files attached but not yet sent; they become cards on this message. */
   documents?: AttachedFile[]
   /** Called with the server's id for the message, once it exists. */
@@ -306,7 +308,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               })
             },
             onArtifactStep: (step) => {
-              patchBuild((build) => ({ ...build, steps: [...build.steps, step] }))
+              patchBuild((build) => ({ ...build, steps: mergeStep(build.steps, step) }))
             },
             onArtifactDelta: (text) => {
               patchBuild((build) => ({ ...build, source: build.source + text }))
@@ -371,6 +373,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
           conversation_id: conversationId,
           content: trimmed,
           search_mode: options?.searchMode ?? 'auto',
+          artifact_id: options?.artifactId ?? null,
         },
         (start) => {
           // The optimistic message takes the server's real id, so anything that

@@ -134,7 +134,9 @@ def test_no_artifact_model_means_no_tool_at_all() -> None:
     assert build_tools(off) == {}
 
     on = Settings(_env_file=None, serpapi_key="", artifact_model="m")  # type: ignore[call-arg]
-    assert set(build_tools(on)) == {"create_artifact"}
+    # Both registered; the turn decides whether editing is offered, since
+    # there is nothing to edit until something is open.
+    assert set(build_tools(on)) == {"create_artifact", "edit_artifact"}
 
 
 async def test_an_unknown_kind_is_refused_by_name() -> None:
@@ -278,3 +280,140 @@ async def test_a_search_tool_does_not_produce_artifact_steps(
 
     assert not any(isinstance(e, ArtifactStepEvent) for e in events)
     assert any(isinstance(e, ToolEvent) for e in events)
+
+
+# --- changing what is open ----------------------------------------------
+
+
+class RevisableFakePoster(FakePoster):
+    def __init__(self) -> None:
+        super().__init__()
+        self.instructions: list[str] = []
+
+    async def revise(self, *, html: str, spec: DesignSpec, instruction: str):
+        self.instructions.append(instruction)
+        yield Step(label="Redrawing", detail="")
+        yield Finished(
+            built=Built(
+                html=f"{DOCUMENT}<!-- {instruction} -->",
+                spec=spec,
+                model="fake-artifact",
+                completion_tokens=400,
+            )
+        )
+
+
+def asking_to_change(session, registry, kind, instruction="make it warmer"):
+    from app.tools.artifact import EditArtifactTool
+
+    tool = EditArtifactTool({kind.name: kind})
+    provider = FakeProvider(
+        ["Warmer it is."],
+        tool_calls=[
+            ToolCall(
+                id="call_1",
+                name=tool.name,
+                arguments=json.dumps({"instruction": instruction}),
+            )
+        ],
+    )
+    service = build_service(
+        session, provider, registry, tools={tool.name: tool}, tool_calling=True
+    )
+    return provider, service
+
+
+async def existing_poster(session, db_user, registry):
+    """A poster already made, the way a real one gets there."""
+    _, service = asking_for_a_poster(session, registry, FakePoster())
+    events = await turn(service, db_user)
+    done = next(e for e in events if isinstance(e, ArtifactDoneEvent))
+    return done
+
+
+async def test_a_change_from_the_chat_box_becomes_the_next_version(
+    session, db_user, registry
+) -> None:
+    """Typed into the same box as everything else. "Make it warmer" means the
+    poster on screen, not a new poster about warmth."""
+    made = await existing_poster(session, db_user, registry)
+    kind = RevisableFakePoster()
+    _, service = asking_to_change(session, registry, kind)
+
+    events = await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="make it warmer",
+        search_mode="always",
+        artifact_id=made.artifact_id,
+    )
+
+    assert kind.instructions == ["make it warmer"]
+    done = next(e for e in events if isinstance(e, ArtifactDoneEvent))
+    assert done.artifact_id == made.artifact_id
+    assert done.version == 2
+
+    stored = await session.get(Artifact, made.artifact_id)
+    assert stored is not None
+    assert len(stored.versions) == 2
+    assert "make it warmer" in stored.versions[1].html
+
+
+async def test_the_tool_is_not_offered_when_nothing_is_open(
+    session, db_user, registry
+) -> None:
+    """Offering a way to change nothing invites the model to try."""
+    kind = RevisableFakePoster()
+    provider, service = asking_to_change(session, registry, kind)
+
+    await collect(
+        session and service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="make it warmer",
+        search_mode="always",
+    )
+
+    offered = [t["function"]["name"] for t in (provider.requests[0].tools or ())]
+    assert offered == []
+    assert kind.instructions == []
+
+
+async def test_an_open_artifact_offers_it(session, db_user, registry) -> None:
+    made = await existing_poster(session, db_user, registry)
+    kind = RevisableFakePoster()
+    provider, service = asking_to_change(session, registry, kind)
+
+    await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="make it warmer",
+        search_mode="always",
+        artifact_id=made.artifact_id,
+    )
+
+    offered = [t["function"]["name"] for t in (provider.requests[0].tools or ())]
+    assert offered == ["edit_artifact"]
+
+
+async def test_somebody_elses_artifact_is_not_open_to_you(
+    session, db_user, registry
+) -> None:
+    """Ownership is a parameter of the lookup, here as everywhere."""
+    from uuid import uuid4
+
+    kind = RevisableFakePoster()
+    provider, service = asking_to_change(session, registry, kind)
+
+    await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="make it warmer",
+        search_mode="always",
+        artifact_id=uuid4(),
+    )
+
+    assert [t["function"]["name"] for t in (provider.requests[0].tools or ())] == []

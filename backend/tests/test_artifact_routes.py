@@ -339,8 +339,9 @@ async def test_changing_a_word_costs_no_model_call(api, wordy) -> None:
     assert ".canvas{width:794px}" in body["html"]
 
 
-async def test_an_edit_is_a_new_version(api, wordy) -> None:
-    """An edit that overwrites what it replaced cannot be undone."""
+async def test_fixing_a_word_does_not_make_a_new_version(api, wordy) -> None:
+    """Fixing a typo is not a new draft. A version list where every entry
+    differs by one character is a version list nobody reads."""
     async with api as client:
         await sign_in(client)
         body = (
@@ -349,10 +350,11 @@ async def test_an_edit_is_a_new_version(api, wordy) -> None:
                 json={"changes": [{"index": 1, "text": "RM40"}]},
             )
         ).json()
-        first = (await client.get(f"/api/artifacts/{wordy.id}?version=1")).json()
 
-    assert body["version"] == 2
-    assert "RM35" in first["html"]
+    assert body["version"] == 1
+    assert len(body["versions"]) == 1
+    assert "RM40" in body["html"]
+    assert "RM35" not in body["html"]
 
 
 async def test_an_edit_that_changes_nothing_does_not_make_a_version(api, wordy) -> None:
