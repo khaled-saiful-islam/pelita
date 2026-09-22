@@ -1,0 +1,216 @@
+"""What an artifact is, and what a kind of artifact has to provide.
+
+An artifact is one self-contained HTML document. Not a component, not a
+template plus data — a document, because a document is the only format the
+browser, the printer, the share link and the download all already understand.
+Everything else in this package exists to produce one.
+
+A *kind* — poster today, a deck or a small app later — decides what the
+document is allowed to contain, how large the surface is, and how the model is
+asked for it. Adding one is a file implementing `ArtifactKind` and a line in
+`registry.py`; nothing else in the app learns its name.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
+
+
+class ArtifactUnavailable(RuntimeError):
+    """The artifact could not be built, with a message safe to show a user."""
+
+
+@dataclass(frozen=True, slots=True)
+class Canvas:
+    """The surface a kind composes onto.
+
+    Fixed rather than responsive. A poster has edges, and a model told to fill
+    "the page" produces something that fits no page in particular.
+    """
+
+    width: int
+    height: int
+    # What `@page size` should say when the document is printed. A poster is
+    # useless as a PDF that reflows.
+    page: str = "A4"
+
+    @property
+    def ratio(self) -> float:
+        return self.width / self.height
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxPolicy:
+    """What a rendered artifact is allowed to do.
+
+    Least privilege, declared per kind rather than once for everything. A
+    poster is static art: it has no reason to execute a script, so the frame it
+    renders in cannot run one. A kind that genuinely needs scripts asks for
+    them and says so here, where the decision is visible.
+
+    The same policy drives the iframe attribute and the response header, so the
+    preview and the shared page cannot drift apart.
+    """
+
+    scripts: bool = False
+    fonts: bool = True
+    images: bool = False
+
+    @property
+    def iframe_sandbox(self) -> str:
+        """The `sandbox` attribute value. Empty is the strongest setting there
+        is: an opaque origin with scripts, forms and navigation all refused."""
+        return "allow-scripts" if self.scripts else ""
+
+    @property
+    def csp(self) -> str:
+        """The header for serving the document on its own, in a tab or behind a
+        share link. `sandbox` here does what the iframe attribute does for the
+        preview — the document gets an opaque origin, so it cannot read a cookie
+        or call the API with one."""
+        parts = [
+            f"sandbox{' allow-scripts' if self.scripts else ''}",
+            "default-src 'none'",
+            f"script-src {'https:' if self.scripts else "'none'"}",
+            "style-src 'unsafe-inline'" + (" https://fonts.googleapis.com" if self.fonts else ""),
+            "font-src" + (" https://fonts.gstatic.com data:" if self.fonts else " 'none'"),
+            "img-src" + (" data: https:" if self.images else " data:"),
+            "form-action 'none'",
+            "base-uri 'none'",
+        ]
+        return "; ".join(parts)
+
+
+@dataclass(frozen=True, slots=True)
+class Brief:
+    """What the chat model hands over. Never code — a brief.
+
+    Splitting "understand the request" from "design the thing" is what lets the
+    composing step use a different model, a much larger output budget and a
+    prompt full of design instruction, none of which has to ride along in the
+    chat turn's context on every subsequent message.
+    """
+
+    kind: str
+    title: str
+    brief: str
+    style_hints: str = ""
+    data: str = ""
+    # The language the conversation is in, so the poster's own words match it.
+    language: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Swatch:
+    name: str
+    hex: str
+
+
+@dataclass(frozen=True, slots=True)
+class DesignSpec:
+    """The direction, chosen before any layout exists.
+
+    Committing to a named aesthetic first — and deliberately in the abstract,
+    without naming the subject — is what stops every artifact converging on the
+    same look. It is stored rather than inferred, which is what makes a palette
+    change a substitution instead of a regeneration.
+    """
+
+    movement: str
+    rationale: str = ""
+    palette: tuple[Swatch, ...] = ()
+    display_font: str = ""
+    body_font: str = ""
+    layout: str = ""
+    motif: str = ""
+    reference: str = ""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "movement": self.movement,
+            "rationale": self.rationale,
+            "palette": [{"name": s.name, "hex": s.hex} for s in self.palette],
+            "display_font": self.display_font,
+            "body_font": self.body_font,
+            "layout": self.layout,
+            "motif": self.motif,
+            "reference": self.reference,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> DesignSpec:
+        """Tolerant on the way in. A spec is model output stored in a JSON
+        column; a missing key is a worse poster, never a failed page load."""
+        palette = tuple(
+            Swatch(name=str(s.get("name", "")), hex=str(s.get("hex", "")))
+            for s in raw.get("palette") or []
+            if isinstance(s, dict)
+        )
+        return cls(
+            movement=str(raw.get("movement", "")),
+            rationale=str(raw.get("rationale", "")),
+            palette=palette,
+            display_font=str(raw.get("display_font", "")),
+            body_font=str(raw.get("body_font", "")),
+            layout=str(raw.get("layout", "")),
+            motif=str(raw.get("motif", "")),
+            reference=str(raw.get("reference", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Built:
+    """A finished document and what it cost to make."""
+
+    html: str
+    spec: DesignSpec
+    model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    build_ms: int = 0
+    findings: tuple[str, ...] = field(default_factory=tuple)
+
+
+# --- what a build reports while it runs ---------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """A phase of the build, for the panel to show. Honest because the pipeline
+    genuinely has phases — a single opaque call would have nothing to say."""
+
+    label: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Chunk:
+    """Document text as it is written, for the source view."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class Finished:
+    built: Built
+
+
+BuildUpdate = Step | Chunk | Finished
+
+
+@runtime_checkable
+class ArtifactKind(Protocol):
+    """One kind of artifact. Poster today; a deck or an app is another file."""
+
+    name: str
+    label: str
+    # Written for a model to read when choosing between kinds.
+    description: str
+    canvas: Canvas
+    sandbox: SandboxPolicy
+
+    def build(self, brief: Brief) -> AsyncIterator[BuildUpdate]:
+        """Produce the document, reporting as it goes."""
+        ...

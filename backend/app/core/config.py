@@ -122,6 +122,39 @@ class Settings(BaseSettings):
     # model call, so this is the cost ceiling as much as the loop guard.
     tool_max_iterations: int = 3
 
+    # ---- Artifacts -------------------------------------------------------
+    # An artifact is one self-contained HTML document — a poster today, a deck
+    # or a small app later. Composing one needs a much larger output budget
+    # than a chat reply and benefits from a different model, so it gets its own
+    # settings, with the URL and key falling back to the chat provider's.
+    #
+    # Empty `artifact_model` turns the feature off: no tool is offered and the
+    # UI says nothing about it.
+    artifacts_enabled: bool = True
+    artifact_model: str = ""
+    artifact_base_url: str = ""
+    artifact_api_key: str = ""
+    artifact_max_tokens: int = 16384
+    artifact_timeout_seconds: float = 300.0
+    # The refinement pass roughly doubles the wall clock. Worth it on a fast
+    # provider, the first thing to switch off on a slow one.
+    artifact_refine_pass: bool = True
+    # A document larger than this is a runaway, not a richer poster.
+    artifact_max_bytes: int = 262_144
+    artifact_max_per_conversation: int = 10
+
+    @property
+    def artifacts_available(self) -> bool:
+        return self.artifacts_enabled and bool(self.artifact_model.strip())
+
+    @property
+    def resolved_artifact_base_url(self) -> str:
+        return (self.artifact_base_url or self.llm_base_url).rstrip("/")
+
+    @property
+    def resolved_artifact_api_key(self) -> str:
+        return self.artifact_api_key or self.llm_api_key
+
     # ---- Vision ----------------------------------------------------------
     # Reading an uploaded image needs a model that can see, which is rarely the
     # same one that writes the answers. Empty `vision_model` turns the feature
