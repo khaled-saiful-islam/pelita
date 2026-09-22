@@ -17,7 +17,7 @@ DOCUMENT = "<!DOCTYPE html><html><body><div class='canvas'>poster</div></body></
 
 @pytest.fixture
 def api(session):
-    from app.api.deps import get_session
+    from app.api.deps import get_session, limit_auth
     from app.main import create_app
 
     app = create_app()
@@ -25,7 +25,15 @@ def api(session):
     async def _session():
         yield session
 
+    async def _no_auth_limit() -> None:
+        return None
+
     app.dependency_overrides[get_session] = _session
+    # These tests sign in on nearly every case, and the sign-in limit is
+    # counted per address across the whole run. Without this they spend the
+    # budget that `test_rate_limit.py` exists to measure, and that file fails
+    # in a full run while passing on its own.
+    app.dependency_overrides[limit_auth] = _no_auth_limit
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
