@@ -284,6 +284,20 @@ class Plan:
 
 
 @dataclass(frozen=True, slots=True)
+class Designed:
+    """The look, the moment it is decided.
+
+    Sent so the thing being built can be shown in its own colours while it is
+    still being built, instead of in grey boxes that could belong to anything.
+    """
+
+    movement: str
+    palette: tuple[str, ...]
+    display_font: str
+    body_font: str
+
+
+@dataclass(frozen=True, slots=True)
 class Part:
     """One finished piece of an artifact that has several.
 
@@ -304,7 +318,7 @@ class Finished:
     built: Built
 
 
-BuildUpdate = Step | Chunk | Plan | Part | Finished
+BuildUpdate = Step | Chunk | Plan | Designed | Part | Finished
 
 
 @runtime_checkable

@@ -32,6 +32,12 @@ export interface StreamHandlers {
   onArtifactDelta: (text: string) => void
   onArtifactPart: (part: ArtifactPart) => void
   onArtifactPlan: (titles: string[]) => void
+  onArtifactDesign: (design: {
+    movement: string
+    palette: string[]
+    display_font: string
+    body_font: string
+  }) => void
   onArtifactDone: (artifact: Artifact & { findings: string[] }) => void
   onArtifactFailed: (failure: { message: string; retryable: boolean }) => void
   onSuggestions: (items: string[]) => void
@@ -72,6 +78,15 @@ export function dispatchFrame(frame: SseMessage, handlers: StreamHandlers): void
       return handlers.onArtifactDelta(String(payload.text ?? ''))
     case 'artifact.plan':
       return handlers.onArtifactPlan((payload.titles ?? []) as string[])
+    case 'artifact.design':
+      return handlers.onArtifactDesign(
+        payload as unknown as {
+          movement: string
+          palette: string[]
+          display_font: string
+          body_font: string
+        },
+      )
     case 'artifact.part':
       return handlers.onArtifactPart(payload as unknown as ArtifactPart)
     case 'artifact.done':

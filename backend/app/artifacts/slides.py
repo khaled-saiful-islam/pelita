@@ -30,6 +30,7 @@ from app.artifacts.base import (
     BuildUpdate,
     Built,
     Canvas,
+    Designed,
     DesignSpec,
     Finished,
     Part,
@@ -143,6 +144,12 @@ class SlidesKind:
 
         yield Step(label="Choosing a look", detail="palette, type and layouts")
         deck, spec = await self._design(context, outline, count)
+        yield Designed(
+            movement=spec.movement,
+            palette=tuple(swatch.hex for swatch in spec.palette),
+            display_font=spec.display_font,
+            body_font=spec.body_font,
+        )
         yield Step(label="Chose a look", detail=_direction(spec))
 
         photos = await self._photographs(slides)

@@ -31,6 +31,9 @@ class LookupTool(Tool):
     description = "Look something up."
     parameters = text_parameter("query", "What to look up")
     presentation = ToolPresentation(running="Looking up", done="Looked up", noun="hit")
+    # This file is about what the search control does, so its stand-in tool is
+    # one that searches. A tool that does not is covered below.
+    searches = True
 
     def __init__(self, *, results_per_call: int = 2) -> None:
         self.calls: list[str] = []
@@ -241,7 +244,7 @@ async def test_search_mode_always_requires_a_tool(session, db_user, registry) ->
     assert provider.requests[1].tool_choice == "auto"
 
 
-async def test_search_mode_off_offers_nothing(session, db_user, registry) -> None:
+async def test_search_mode_off_offers_no_searching(session, db_user, registry) -> None:
     provider = ScriptedProvider(["ok"])
     tool = LookupTool()
     service = build_service(
@@ -251,6 +254,24 @@ async def test_search_mode_off_offers_nothing(session, db_user, registry) -> Non
 
     assert provider.requests[0].tools == ()
     assert tool.calls == []
+
+
+async def test_search_off_leaves_everything_else_alone(session, db_user, registry) -> None:
+    """Reported as "it is not working": asked for a slide deck with search off,
+    the model typed the headings into the chat, because the turn returned
+    before offering any tool at all and there was nothing to call.
+    """
+    from tests.test_tool_protocol import WeatherTool
+
+    provider = ScriptedProvider([[call("weather", "KL")], "ok"])
+    tool = WeatherTool()
+    service = build_service(
+        session, provider, registry, tools={"weather": tool}, tool_calling=True
+    )
+    await run(service, db_user, mode="off")
+
+    assert [t["function"]["name"] for t in provider.requests[0].tools] == ["weather"]
+    assert tool.calls
 
 
 async def test_the_exchange_is_replayed_to_the_model(session, db_user, registry) -> None:

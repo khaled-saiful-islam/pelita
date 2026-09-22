@@ -109,6 +109,16 @@ class Planned:
 
 
 @dataclass(frozen=True, slots=True)
+class Looks:
+    """The palette and faces an artifact has chosen, while it is being made."""
+
+    movement: str
+    palette: tuple[str, ...]
+    display_font: str
+    body_font: str
+
+
+@dataclass(frozen=True, slots=True)
 class Piece:
     """Part of an artifact, finished ahead of the rest.
 
@@ -139,7 +149,19 @@ class Made:
     replaces: Any | None = None
 
 
-ToolUpdate = Progress | Results | Making | Drafting | Planned | Piece | Made
+ToolUpdate = Progress | Results | Making | Drafting | Planned | Looks | Piece | Made
+
+
+@runtime_checkable
+class SearchingTool(Protocol):
+    """A tool that goes and looks something up on the web.
+
+    Declared so the search control can govern searching and nothing else.
+    Turning search off used to take every tool with it, including the ones
+    that make things, because one early return covered them all.
+    """
+
+    searches: bool
 
 
 @runtime_checkable

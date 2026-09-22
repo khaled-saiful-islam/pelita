@@ -69,6 +69,7 @@ from app.services.document_service import DocumentService
 from app.services.events import (
     AccountingEvent,
     ArtifactDeltaEvent,
+    ArtifactDesignEvent,
     ArtifactDoneEvent,
     ArtifactFailedEvent,
     ArtifactPartEvent,
@@ -93,6 +94,7 @@ from app.services.suggestion_service import suggest
 from app.tools.base import (
     ArtifactAwareTool,
     Drafting,
+    Looks,
     Made,
     Making,
     Piece,
@@ -100,6 +102,7 @@ from app.tools.base import (
     Progress,
     ProgressiveTool,
     Results,
+    SearchingTool,
     Tool,
     ToolUnavailable,
     ToolUpdate,
@@ -366,12 +369,18 @@ class ChatService:
         for verdict in self._scan(state.question, ContentSource.USER_INPUT):
             yield guard_payload(verdict)
 
-        if search_mode == "off":
+        state.offered = self._tools_to_offer(state, search_mode)
+        if state.offered:
+            # Forced only when the person asked for search on every message,
+            # and only if there is something to search with. Forcing a call
+            # with only a make-something tool on the table would have it make
+            # something nobody asked for.
+            state.force_tool = search_mode == "always" and any(
+                _searches(tool) for tool in state.offered.values()
+            )
             return
 
-        state.offered = self._tools_to_offer(state)
-        if state.offered:
-            state.force_tool = search_mode == "always"
+        if search_mode == "off":
             return
 
         decision = await self._should_search(
@@ -416,7 +425,7 @@ class ChatService:
             logger.exception("could not load the open artifact %s", artifact_id)
             return None
 
-    def _tools_to_offer(self, state: TurnState) -> dict[str, Tool]:
+    def _tools_to_offer(self, state: TurnState, search_mode: str = "auto") -> dict[str, Tool]:
         """The tools this turn hands the model, or nothing.
 
         Nothing means the turn falls back to `_select_tool` — which keeps search
@@ -431,12 +440,16 @@ class ChatService:
         # and therefore what the model calls back with. The registry's key is
         # usually the same string, but dispatch must not depend on that.
         #
-        # A tool that acts on the open artifact is withheld when there is none.
-        # Offering a way to change nothing invites the model to try.
+        # A tool that acts on the open artifact is withheld when there is none:
+        # offering a way to change nothing invites the model to try. Searching
+        # is withheld when the person turned search off — and only searching,
+        # because "off" was never meant to mean "and do not make anything
+        # either".
         return {
             tool.name: tool
             for tool in self._tools.values()
-            if state.open_artifact is not None or not _needs_open_artifact(tool)
+            if (state.open_artifact is not None or not _needs_open_artifact(tool))
+            and not (search_mode == "off" and _searches(tool))
         }
 
     def _select_tool(self, decision: SearchDecision) -> Tool | None:
@@ -496,6 +509,14 @@ class ChatService:
                     continue
                 if isinstance(update, Drafting):
                     yield ArtifactDeltaEvent(text=update.text)
+                    continue
+                if isinstance(update, Looks):
+                    yield ArtifactDesignEvent(
+                        movement=update.movement,
+                        palette=update.palette,
+                        display_font=update.display_font,
+                        body_font=update.body_font,
+                    )
                     continue
                 if isinstance(update, Planned):
                     yield ArtifactPlanEvent(titles=update.titles)
@@ -1210,6 +1231,11 @@ def _caveats(note: str) -> str:
     if not note:
         return ""
     return f" Tell them this, plainly and in one sentence: {note}"
+
+
+def _searches(tool: Tool) -> bool:
+    """Decided by shape, never by name — the same rule as everything else."""
+    return isinstance(tool, SearchingTool) and bool(tool.searches)
 
 
 def _needs_open_artifact(tool: Tool) -> bool:

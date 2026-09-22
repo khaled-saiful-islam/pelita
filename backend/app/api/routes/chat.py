@@ -22,6 +22,7 @@ from app.core.errors import PelitaError
 from app.services.events import (
     AccountingEvent,
     ArtifactDeltaEvent,
+    ArtifactDesignEvent,
     ArtifactDoneEvent,
     ArtifactFailedEvent,
     ArtifactPartEvent,
@@ -139,6 +140,18 @@ def _to_sse(event: object) -> dict[str, str] | None:
             return {
                 "event": "artifact.plan",
                 "data": json.dumps({"titles": list(event.titles)}),
+            }
+        case ArtifactDesignEvent():
+            return {
+                "event": "artifact.design",
+                "data": json.dumps(
+                    {
+                        "movement": event.movement,
+                        "palette": list(event.palette),
+                        "display_font": event.display_font,
+                        "body_font": event.body_font,
+                    }
+                ),
             }
         case ArtifactPartEvent():
             return {

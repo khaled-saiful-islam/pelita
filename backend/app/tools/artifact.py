@@ -20,14 +20,20 @@ from app.artifacts.base import (
     ArtifactUnavailable,
     Brief,
     Chunk,
+    Designed,
     Finished,
     OpenArtifact,
+    Part,
+    Plan,
     Step,
 )
 from app.tools.base import (
     Drafting,
+    Looks,
     Made,
     Making,
+    Piece,
+    Planned,
     Progress,
     ToolPresentation,
     ToolUnavailable,
@@ -61,11 +67,15 @@ class CreateArtifactTool:
     def description(self) -> str:
         made = "; ".join(f"{kind.name} - {kind.description}" for kind in self._kinds.values())
         return (
-            "Design something to look at rather than read: "
+            "Make something to look at rather than read: "
             f"{made} "
-            "Call this when the value is in how it looks. Do not call it to "
-            "format an answer that is really text, and do not write any HTML "
-            "or CSS yourself - describe what is wanted and it gets designed."
+            "Call this whenever somebody asks for one of these, in any words - "
+            "a poster, a flyer, a deck, slides, a presentation. Never write it "
+            "out in the message instead: a list of slide headings in a chat "
+            "reply is not a deck, and it is not what they asked for. Do not "
+            "call it to format an answer that is really text, and do not write "
+            "any HTML or CSS yourself - describe what is wanted and it gets "
+            "designed."
         )
 
     @property
@@ -145,6 +155,22 @@ class CreateArtifactTool:
                     yield Progress(label=update.label, detail=update.detail)
                 elif isinstance(update, Chunk):
                     yield Drafting(text=update.text)
+                elif isinstance(update, Plan):
+                    yield Planned(titles=update.titles)
+                elif isinstance(update, Designed):
+                    yield Looks(
+                        movement=update.movement,
+                        palette=update.palette,
+                        display_font=update.display_font,
+                        body_font=update.body_font,
+                    )
+                elif isinstance(update, Part):
+                    yield Piece(
+                        index=update.index,
+                        total=update.total,
+                        title=update.title,
+                        html=update.html,
+                    )
                 elif isinstance(update, Finished):
                     yield Made(kind=kind.name, title=title, built=update.built)
         except ArtifactUnavailable as exc:

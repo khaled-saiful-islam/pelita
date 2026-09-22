@@ -112,6 +112,16 @@ class ArtifactPlanEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactDesignEvent:
+    """What it is going to look like, before it looks like anything."""
+
+    movement: str
+    palette: tuple[str, ...]
+    display_font: str
+    body_font: str
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactPartEvent:
     """One piece of a multi-part artifact, ready to look at.
 
@@ -169,6 +179,7 @@ ChatEvent = (
     | ArtifactStepEvent
     | ArtifactDeltaEvent
     | ArtifactPlanEvent
+    | ArtifactDesignEvent
     | ArtifactPartEvent
     | ArtifactDoneEvent
     | ArtifactFailedEvent

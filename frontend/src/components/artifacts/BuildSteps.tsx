@@ -11,10 +11,17 @@ import type { ArtifactBuild } from '@/lib/chat-types'
  * finished-looking tick is indistinguishable from a hang, which is the single
  * thing this display exists to prevent.
  */
+const PATIENCE: Record<string, string> = {
+  poster: 'A poster takes a minute or so. It is being designed, not filled into a template.',
+  slides: 'A deck takes a couple of minutes. Every slide is written on its own.',
+}
+
 export function BuildSteps({ build }: { build: ArtifactBuild }) {
   const elapsed = useElapsed(!build.failed)
   const steps = build.steps
-  const current = steps.length - 1
+  // A deck reports every slide as it lands and shows them below, so the list
+  // above only needs the last few lines rather than all fourteen.
+  const shown = build.kind === 'slides' ? steps.slice(-4) : steps
 
   return (
     <div>
@@ -28,8 +35,8 @@ export function BuildSteps({ build }: { build: ArtifactBuild }) {
       </div>
 
       <ol className="space-y-2.5 text-sm" aria-live="polite">
-        {steps.map((step, index) => {
-          const running = index === current && !build.failed
+        {shown.map((step, index) => {
+          const running = index === shown.length - 1 && !build.failed
           return (
             <li key={`${step.label}-${index}`} className="flex items-start gap-2.5">
               <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
@@ -54,7 +61,7 @@ export function BuildSteps({ build }: { build: ArtifactBuild }) {
 
       {!build.failed && (
         <p className="mt-4 text-xs text-muted-foreground">
-          A poster takes a minute or so. It is being designed, not filled into a template.
+          {PATIENCE[build.kind] ?? 'This is being made, not filled into a template.'}
         </p>
       )}
     </div>

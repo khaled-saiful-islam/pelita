@@ -17,6 +17,8 @@ from app.tools.serpapi import SearchProvider, SearchUnavailable
 
 class WebSearchTool(Tool):
     name = "web_search"
+    # Read by the turn, so the search control governs search and nothing else.
+    searches = True
     description = (
         "Search the web for current information: news, prices, weather, recent "
         "events, or anything that may have changed since training."
@@ -42,6 +44,7 @@ class WebSearchTool(Tool):
 
 class ImageSearchTool(Tool):
     name = "image_search"
+    searches = True
     description = (
         "Find pictures of something, for when the user asks to be shown it "
         "rather than told about it."

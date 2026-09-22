@@ -419,3 +419,57 @@ async def test_somebody_elses_artifact_is_not_open_to_you(
     )
 
     assert [t["function"]["name"] for t in (provider.requests[0].tools or ())] == []
+
+
+async def test_turning_search_off_does_not_turn_off_making_things(
+    session, db_user, registry
+) -> None:
+    """Reported as "it is not working": asked for a slide deck, the model typed
+    the headings into the chat instead. Search was off, and the turn returned
+    before offering any tool at all — so there was nothing to call.
+    """
+    kind = FakePoster()
+    provider, service = asking_for_a_poster(session, registry, kind)
+
+    await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="make me a poster",
+        search_mode="off",
+    )
+
+    offered = [t["function"]["name"] for t in (provider.requests[0].tools or ())]
+    assert offered == ["create_artifact"]
+    assert len(kind.briefs) == 1
+
+
+async def test_searching_is_what_the_search_control_governs(
+    session, db_user, registry
+) -> None:
+    from app.tools.artifact import CreateArtifactTool
+    from app.tools.web_search import WebSearchTool
+    from tests.test_tool_protocol import WeatherTool
+
+    assert getattr(WebSearchTool, "searches", False) is True
+    # Everything else is left alone by it.
+    assert getattr(WeatherTool, "searches", False) is False
+    assert getattr(CreateArtifactTool, "searches", False) is False
+
+
+async def test_search_on_every_message_never_forces_a_poster(
+    session, db_user, registry
+) -> None:
+    """With only a make-something tool on the table, forcing a call would have
+    it make something nobody asked for."""
+    _, service = asking_for_a_poster(session, registry, FakePoster())
+
+    events = await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content="hello",
+        search_mode="always",
+    )
+
+    assert events  # the turn ran rather than being forced into a tool

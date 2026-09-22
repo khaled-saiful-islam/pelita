@@ -87,6 +87,14 @@ export interface ArtifactBuild {
   /** What is coming, named before it exists, so the shape is on screen from
    *  the start. */
   plan?: string[]
+  /** The look it has chosen, so it can be shown in its own colours while it is
+   *  still being built. */
+  design?: {
+    movement: string
+    palette: string[]
+    display_font: string
+    body_font: string
+  }
   failed?: string | null
 }
 
