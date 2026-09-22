@@ -71,7 +71,7 @@ function Chip({ file, onRemove }: { file: AttachedFile; onRemove: () => void }) 
         type="button"
         onClick={onRemove}
         aria-label={`Remove ${file.filename}`}
-        className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+        className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-hover hover:text-destructive"
       >
         <X className="size-3" aria-hidden />
       </button>

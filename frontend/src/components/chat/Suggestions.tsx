@@ -25,7 +25,7 @@ export function Suggestions({
           type="button"
           disabled={disabled}
           onClick={() => onPick(item)}
-          className="group/chip inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          className="group/chip inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:border-hover-border hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         >
           {item}
           <ArrowUpRight

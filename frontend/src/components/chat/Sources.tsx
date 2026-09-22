@@ -33,7 +33,7 @@ export function Sources({ sources }: { sources: Source[] }) {
                 href={source.url}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="group/source flex gap-2 rounded-lg border border-border bg-surface p-2.5 transition-colors hover:bg-muted"
+                className="group/source flex gap-2 rounded-lg border border-border bg-surface p-2.5 transition-colors hover:border-hover-border hover:bg-hover"
               >
                 <span className="mt-0.5 shrink-0 text-xs tabular-nums text-muted-foreground">
                   [{source.rank}]

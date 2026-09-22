@@ -295,7 +295,7 @@ function ThemeCard() {
               'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors',
               choice === value
                 ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-muted',
+                : 'text-muted-foreground hover:bg-hover',
             )}
           >
             <Icon className="size-3.5" aria-hidden />

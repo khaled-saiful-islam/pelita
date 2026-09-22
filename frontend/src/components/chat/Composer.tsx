@@ -179,7 +179,7 @@ export function Composer({
               'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors',
               atFileLimit || uploadingFile
                 ? 'cursor-not-allowed text-muted-foreground/50'
-                : 'text-muted-foreground hover:bg-muted',
+                : 'text-muted-foreground hover:bg-hover',
             )}
           >
             <Paperclip className="size-3.5" aria-hidden />
@@ -211,8 +211,8 @@ export function Composer({
               'inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors',
               !searchEnabled && 'cursor-not-allowed text-muted-foreground/50',
               searchEnabled && searchMode === 'always' && 'bg-accent-100 text-accent-800',
-              searchEnabled && searchMode === 'auto' && 'text-muted-foreground hover:bg-muted',
-              searchEnabled && searchMode === 'off' && 'text-muted-foreground/60 hover:bg-muted',
+              searchEnabled && searchMode === 'auto' && 'text-muted-foreground hover:bg-hover',
+              searchEnabled && searchMode === 'off' && 'text-muted-foreground/60 hover:bg-hover',
             )}
           >
             <Globe className="size-3.5" aria-hidden />
@@ -244,7 +244,7 @@ export function Composer({
                       }
                       setMenuOpen(false)
                     }}
-                    className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted"
+                    className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-hover"
                   >
                     <Check
                       className={cn(

@@ -114,7 +114,7 @@ function ActionButton({
       aria-pressed={active}
       className={cn(
         'grid size-7 place-items-center rounded-md transition-colors',
-        active ? 'text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        active ? 'text-primary' : 'text-muted-foreground hover:bg-hover hover:text-foreground',
       )}
     >
       {children}
@@ -153,14 +153,14 @@ function ReasonBox({
       <button
         type="button"
         onClick={() => onSubmit(reason)}
-        className="rounded px-2 py-1 text-xs font-medium text-primary hover:bg-muted"
+        className="rounded px-2 py-1 text-xs font-medium text-primary hover:bg-hover"
       >
         Send
       </button>
       <button
         type="button"
         onClick={onDismiss}
-        className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+        className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-hover"
       >
         Skip
       </button>

@@ -364,7 +364,7 @@ function DownloadMenu({
               href={base}
               download
               onClick={() => setOpen(false)}
-              className="px-3 py-2 text-left text-xs hover:bg-muted"
+              className="px-3 py-2 text-left text-xs hover:bg-hover"
             >
               <span className="block font-medium">
                 {deck ? 'Slides (PDF)' : 'Picture (PNG)'}
@@ -377,7 +377,7 @@ function DownloadMenu({
               href={`${base}&format=html`}
               download
               onClick={() => setOpen(false)}
-              className="px-3 py-2 text-left text-xs hover:bg-muted"
+              className="px-3 py-2 text-left text-xs hover:bg-hover"
             >
               <span className="block font-medium">Document (HTML)</span>
               <span className="block text-muted-foreground">To edit or print later</span>

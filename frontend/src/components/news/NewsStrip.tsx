@@ -147,7 +147,7 @@ function Arrow({
         // do not exist on a touch screen, and are guesswork on a desktop.
         'absolute top-1/2 z-10 grid -translate-y-1/2',
         'size-8 place-items-center rounded-full border border-border bg-surface shadow',
-        'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+        'text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
         // Tucked outside the track where there is room, overlapping the edge on
         // a narrow screen rather than being pushed off it.
         side === 'left' ? 'left-1 sm:-left-3' : 'right-1 sm:-right-3',

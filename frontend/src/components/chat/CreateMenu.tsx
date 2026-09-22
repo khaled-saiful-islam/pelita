@@ -89,7 +89,7 @@ export function CreateMenu({
                   onPick(OPENINGS[thing.name] ?? `Make a ${thing.label.toLowerCase()} about `)
                   setOpen(false)
                 }}
-                className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-muted"
+                className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-hover"
               >
                 <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
                   <Icon className="size-3.5 text-muted-foreground" aria-hidden />
