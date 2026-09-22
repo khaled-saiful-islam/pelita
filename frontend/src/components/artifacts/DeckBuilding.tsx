@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { readableOn } from '@/lib/contrast'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
@@ -15,7 +14,6 @@ import type { ArtifactBuild } from '@/lib/chat-types'
  * somebody else's colours is a progress display for something else, and the
  * colours are known a full minute before the slides are.
  */
-const RATIO = 9 / 16
 
 export function DeckBuilding({ build }: { build: ArtifactBuild }) {
   const planned = build.plan ?? []
@@ -101,67 +99,43 @@ export function DeckBuilding({ build }: { build: ArtifactBuild }) {
             </span>
           </div>
 
-          <div
-            ref={grid}
-            className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-x-3 gap-y-4"
-            style={{ ['--thumb-scale' as string]: String(scale) }}
-          >
-            {Array.from({ length: total }, (_, index) => {
-              const part = made.get(index)
-              const next = !part && index === made.size
-              const heading = part?.title ?? planned[index] ?? `Slide ${index + 1}`
-              return (
-                <div key={index} className="min-w-0">
+          {made.size < total && (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3 shrink-0 animate-spin text-primary" aria-hidden />
+              <span className="shimmer">
+                Writing slide {made.size + 1}
+                {planned[made.size] ? ` — ${planned[made.size]}` : ''}
+              </span>
+            </p>
+          )}
+
+          {/* Only the slides that exist. An empty grey rectangle is not a
+              preview of anything, and a screen of them is not progress. */}
+          {made.size > 0 && (
+            <div
+              ref={grid}
+              className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-x-3 gap-y-4"
+              style={{ ['--thumb-scale' as string]: String(scale) }}
+            >
+              {build.parts.map((part) => (
+                <div key={part.index} className="min-w-0">
                   <div
-                    className={cn(
-                      'relative overflow-hidden rounded-md ring-1 transition-all duration-500',
-                      part ? 'arriving shadow-md ring-border' : 'ring-border/50',
-                      next && 'ring-2',
-                    )}
-                    style={{
-                      aspectRatio: `${1 / RATIO}`,
-                      ...(next && accent ? { borderColor: accent, boxShadow: `0 0 0 2px ${accent}55` } : {}),
-                      ...(part ? {} : { background: design?.palette?.[0] ?? undefined }),
-                    }}
+                    className="arriving relative overflow-hidden rounded-md shadow-md ring-1 ring-border"
+                    style={{ aspectRatio: '16 / 9' }}
                   >
-                    {part ? (
-                      <SlideThumb html={part.html} />
-                    ) : (
-                      <span
-                        className={cn(
-                          'absolute inset-0',
-                          next ? 'shimmer' : 'opacity-40',
-                        )}
-                        style={{ background: design?.palette?.[0] ?? 'hsl(var(--muted))' }}
-                      />
-                    )}
+                    <SlideThumb html={part.html} />
                     <span className="absolute bottom-0 right-0 rounded-tl bg-background/85 px-1 text-[10px] tabular-nums">
-                      {index + 1}
+                      {part.index + 1}
                     </span>
                   </div>
                   <p className="mt-1.5 flex items-start gap-1 text-xs leading-snug">
-                    <span className="mt-[3px] shrink-0">
-                      {part ? (
-                        <Check className="size-3 text-success" aria-hidden />
-                      ) : next ? (
-                        <Loader2 className="size-3 animate-spin text-primary" aria-hidden />
-                      ) : (
-                        <span className="block size-3" />
-                      )}
-                    </span>
-                    <span
-                      className={cn(
-                        'line-clamp-2 min-w-0',
-                        part ? 'text-foreground' : 'text-muted-foreground',
-                      )}
-                    >
-                      {heading}
-                    </span>
+                    <Check className="mt-[3px] size-3 shrink-0 text-success" aria-hidden />
+                    <span className="line-clamp-2 min-w-0">{part.title}</span>
                   </p>
                 </div>
-              )
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>

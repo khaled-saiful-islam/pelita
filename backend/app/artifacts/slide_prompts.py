@@ -11,7 +11,10 @@ talk; it is a table of contents read aloud.
 
 from __future__ import annotations
 
-DEFAULT_SLIDES = 10
+# Five, not ten. A deck nobody asked a size for is one somebody is waiting on,
+# and ten slides is two minutes of waiting for twice the deck they wanted.
+# Asking for more is one sentence; waiting is not.
+DEFAULT_SLIDES = 5
 MIN_SLIDES = 3
 MAX_SLIDES = 24
 
@@ -69,14 +72,20 @@ Reply with JSON and nothing else:
   ]}
 """
 
-DESIGN_SYSTEM = """
+# The stylesheet is asked for after a marker rather than inside a JSON string.
+# A deck's CSS is full of quotes and newlines -- `font-family: "Lora"`,
+# `content: "01"` -- and a model escaping all of that into one JSON value gets
+# it wrong often enough that whole decks were lost to a parse error.
+CSS_MARKER = "---CSS---"
+
+DESIGN_SYSTEM = f"""
 You are choosing how a deck looks, before any slide is written.
 
 Name the direction in one or two words, as a small art movement would be named,
 and let the subject decide it. A deck about coral reefs and a deck about
 quarterly churn are not the same object, and neither is black text on white.
 
-Return a stylesheet that every slide will share. It must define:
+Write a stylesheet that every slide will share. It must define:
 
 - `:root` custom properties for a palette of five to seven named colours: a
   ground, two or three inks with different weight, one accent that carries
@@ -85,28 +94,45 @@ Return a stylesheet that every slide will share. It must define:
   subject actually calls for it.
 - Two font families from Google Fonts, chosen for the subject: a display face
   with character and a body face that stays readable at a distance.
-- `.slide` — the slide surface itself, exactly the width and height given,
+- `.slide` -- the slide surface itself, exactly the width and height given,
   `overflow: hidden`, `position: relative`, `display: flex`, with generous
   padding. Every slide is this size.
 - Classes for each layout the outline asked for: `.slide--title`,
   `.slide--points` and so on, each doing its job properly rather than all
   looking alike.
 - Type scale, `h1` through `p`, a `.eyebrow`, a `.caption`, a `.note`.
-- At least one recurring graphic device — a rule, a corner mark, a numeral, a
-  shape — that makes the deck look like one deck.
+- At least one recurring graphic device -- a rule, a corner mark, a numeral, a
+  shape -- that makes the deck look like one deck.
+
+Not these, whatever the subject:
+- Inter, Space Grotesk or Helvetica as either face. They are what gets reached
+  for when nothing has been decided, and a deck set in them looks like every
+  other deck.
+- Plain white ground with near-black text, or the same inverted. Two defaults
+  are not a palette.
+- A purple-to-blue gradient behind the title.
+- One radius and one faint shadow on every box, so every element reads as the
+  same kind of object.
+- Tracked-out all-caps eyebrows above every heading.
+If the person asked for one of these in their own words, they get it. Their
+words win.
 
 Hard constraints:
 - No scripts, no image URLs, no window units (vh, vw, vmin, vmax) anywhere.
 - Slide numbers via CSS counters, never typed into each slide by hand.
 - Every colour below `:root` refers to a variable. Never repeat a literal hex.
 
-Reply with JSON and nothing else:
+Reply in exactly this shape. Four header lines, then the marker on a line of
+its own, then the stylesheet as plain CSS. No JSON, no code fence, no
+commentary.
 
-{"movement": "two words at most",
- "rationale": "one sentence on why this suits the subject",
- "display_font": "a Google Fonts family",
- "body_font": "a Google Fonts family",
- "css": "the whole stylesheet, as one string"}
+MOVEMENT: two words at most
+DISPLAY: a Google Fonts family
+BODY: a Google Fonts family
+WHY: one sentence on why this suits the subject
+{CSS_MARKER}
+:root {{ ... }}
+.slide {{ ... }}
 """
 
 SLIDE_SYSTEM = f"""

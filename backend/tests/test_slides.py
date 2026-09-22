@@ -6,8 +6,9 @@ import pytest
 
 from app.artifacts.base import Brief
 from app.artifacts.deck import Deck, document, one_slide, replace_sections, sections_of
+from app.artifacts.imagery import Photo, attach_photos
 from app.artifacts.slide_prompts import DEFAULT_SLIDES, MAX_SLIDES, MIN_SLIDES
-from app.artifacts.slides import wanted_slides
+from app.artifacts.slides import _photo_variables, _photos_in_use, wanted_slides
 
 DECK = Deck(title="Kopi", css=".slide--title{color:red}", width=1600, height=900,
             fonts=("Lora", "Work Sans"))
@@ -36,7 +37,10 @@ def test_a_number_in_the_brief_is_the_fallback() -> None:
     assert wanted_slides(brief("a 12 page deck")) == 12
 
 
-def test_no_number_means_ten() -> None:
+def test_no_number_means_five() -> None:
+    """A deck nobody gave a size is one somebody is waiting on. Ten was twice
+    the wait for twice the deck they asked for."""
+    assert DEFAULT_SLIDES == 5
     assert wanted_slides(brief("a deck about kopi")) == DEFAULT_SLIDES
 
 
@@ -263,3 +267,141 @@ async def test_a_talk_without_sources_is_still_a_talk() -> None:
         FakeDeckModel({}), search=FakeSources(fail="timed out")  # type: ignore[arg-type]
     )
     assert await kind._research(brief("about kopi")) == ""
+
+
+# --- reading the design back --------------------------------------------
+
+
+def a_look(text: str):
+    from app.artifacts.slides import _read_look
+
+    return _read_look(text)
+
+
+def test_the_stylesheet_survives_quotes_and_newlines() -> None:
+    """Why it is not asked for as a JSON string. A deck's CSS is full of
+    `font-family: "Lora"` and `content: "01"`, and a model escaping all of that
+    into one JSON value gets it wrong often enough that whole decks were lost
+    to a parse error — reported as "the design model returned no stylesheet".
+    """
+    look = a_look(
+        'MOVEMENT: Kopitiam Warmth\n'
+        'DISPLAY: Lora\n'
+        'BODY: Work Sans\n'
+        'WHY: it suits the subject\n'
+        '---CSS---\n'
+        ':root { --ground: #f3ead7; }\n'
+        '.slide { font-family: "Lora", serif; }\n'
+        '.slide::after { content: "01"; }\n'
+    )
+
+    assert look.movement == "Kopitiam Warmth"
+    assert look.display_font == "Lora"
+    assert look.body_font == "Work Sans"
+    assert 'font-family: "Lora", serif' in look.css
+    assert 'content: "01"' in look.css
+
+
+def test_a_model_that_forgot_the_marker_still_works() -> None:
+    """The stylesheet starts where :root does, whatever came before it."""
+    look = a_look('MOVEMENT: Plain\nDISPLAY: Lora\nBODY: Inter\n:root { --a: #fff; }')
+    assert look.css.startswith(":root")
+    assert look.movement == "Plain"
+
+
+def test_a_fenced_answer_is_unwrapped() -> None:
+    look = a_look('MOVEMENT: X\n---CSS---\n```css\n:root { --a: #fff; }\n```')
+    assert look.css.startswith(":root")
+    assert "```" not in look.css
+
+
+def test_nothing_usable_is_nothing_usable() -> None:
+    """Reported honestly rather than turned into an empty deck."""
+    assert a_look("I think a warm palette would be nice.").css == ""
+
+
+def test_the_faces_fall_back_rather_than_being_empty() -> None:
+    look = a_look("---CSS---\n:root { --a: #fff; }")
+    assert look.display_font and look.body_font
+
+
+def test_a_slide_is_sixteen_by_nine_whatever_the_design_says() -> None:
+    """A slide that is not the size it claims is broken in a way no stylesheet
+    should be able to cause, and the design's CSS comes after the shell."""
+    from app.artifacts.deck import Deck as DeckShape
+
+    overriding = DeckShape(
+        title="x",
+        css=".slide { width: 1024px; height: 768px; }",
+        width=1600,
+        height=900,
+    )
+    html = document(overriding, SECTIONS)
+
+    # The design's own rule is still there; ours is after it and wins.
+    assert "width: 1024px" in html
+    assert html.index("width: 1024px") < html.rindex("width: 1600px")
+    assert pytest.approx(16 / 9) == 1600 / 900
+
+
+def test_a_declared_aspect_ratio_does_not_outlive_the_guard() -> None:
+    """Width and height already beat `aspect-ratio`, so the box renders 16:9
+    either way — but the computed style would still report the design's
+    figure, which misleads whoever debugs the deck next."""
+    from app.artifacts.deck import Deck as DeckShape
+
+    lying = DeckShape(
+        title="x",
+        css=".slide { aspect-ratio: 4 / 3; }",
+        width=1600,
+        height=900,
+    )
+    html = document(lying, SECTIONS)
+
+    assert html.index("aspect-ratio: 4 / 3") < html.rindex("aspect-ratio: auto")
+
+
+def test_the_ratio_is_the_one_people_present_in() -> None:
+    from app.artifacts.slides import WIDESCREEN
+
+    assert pytest.approx(16 / 9) == WIDESCREEN.width / WIDESCREEN.height
+
+
+# --- which picture a slide is told about --------------------------------
+
+
+def _photo(tag: str) -> Photo:
+    return Photo(data_uri=f"data:image/jpeg;base64,{tag}", source="", width=800, height=600)
+
+
+def test_each_slide_is_told_the_variable_its_own_picture_lands_in() -> None:
+    """The names come from position in the attached list. Told the wrong one,
+    a slide puts another slide's photograph behind its words."""
+    ordered, variables = _photo_variables({3: _photo("C"), 1: _photo("A")})
+
+    assert [p.data_uri[-1] for p in ordered] == ["A", "C"]
+    assert variables == {1: "--photo", 3: "--photo-2"}
+
+
+def test_a_picture_no_slide_used_is_not_embedded() -> None:
+    """A hundred kilobytes of base64 in every copy of the deck, to show
+    nobody anything."""
+    ordered, variables = _photo_variables({0: _photo("A")})
+    html = "<section class='slide'><h1>No picture here</h1></section>"
+
+    assert _photos_in_use(html, ordered, variables) == [None]
+
+
+def test_dropping_an_unused_picture_does_not_rename_the_others() -> None:
+    """Dropping it from the list would shift every name after it, and the
+    slide asking for `--photo-2` would get the wrong photograph."""
+    ordered, variables = _photo_variables({0: _photo("A"), 1: _photo("B")})
+    html = "<section class='slide' style='background-image: var(--photo-2)'></section>"
+
+    in_use = _photos_in_use(html, ordered, variables)
+
+    assert in_use[0] is None
+    assert in_use[1] is not None and in_use[1].data_uri.endswith("B")
+    assert '--photo-2: url("data:image/jpeg;base64,B")' in attach_photos(
+        "<style>:root{}</style>", in_use
+    )

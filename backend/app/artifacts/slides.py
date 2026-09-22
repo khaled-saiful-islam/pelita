@@ -51,6 +51,7 @@ from app.artifacts.imagery import (
 )
 from app.artifacts.model import ArtifactModel, Written, strip_fence
 from app.artifacts.slide_prompts import (
+    CSS_MARKER,
     DECK_CHANGE_SYSTEM,
     DEFAULT_SLIDES,
     DESIGN_SYSTEM,
@@ -70,6 +71,17 @@ WIDESCREEN = Canvas(width=1600, height=900, page="1600px 900px")
 # turns a three-minute deck into about a minute.
 AT_ONCE = 3
 _COUNT = re.compile(r"\b(\d{1,2})\s*(?:slides?|pages?)\b", re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class Look:
+    """A deck's design, as the model described it."""
+
+    movement: str = ""
+    display_font: str = "Playfair Display"
+    body_font: str = "Work Sans"
+    why: str = ""
+    css: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,18 +165,19 @@ class SlidesKind:
         yield Step(label="Chose a look", detail=_direction(spec))
 
         photos = await self._photographs(slides)
-        if photos:
-            yield Step(label="Found pictures", detail=f"{len(photos)} of them")
+        ordered, variables = _photo_variables(photos)
+        if ordered:
+            yield Step(label="Found pictures", detail=f"{len(ordered)} of them")
 
         # Filled as they are written; the generator yields what the panel
         # should show and leaves the pieces here.
         sections: dict[int, str] = {}
-        async for update in self._write_slides(deck, slides, photos, count, sections):
+        async for update in self._write_slides(deck, slides, variables, count, sections):
             yield update
 
         html = document(deck, [sections[i] for i in sorted(sections)])
-        if photos:
-            html = attach_photos(html, [photo for _, photo in sorted(photos.items())])
+        if ordered:
+            html = attach_photos(html, _photos_in_use(html, ordered, variables))
 
         yield Step(label="Checking it fits")
         yield Finished(
@@ -331,29 +344,39 @@ class SlidesKind:
             f"It has {count} slides using these layouts: {layouts}\n"
             f"Each slide is exactly {self.canvas.width}px by {self.canvas.height}px."
         )
-        answered = await self._model.decide(DESIGN_SYSTEM, asked, max_tokens=6000)
 
-        css = str(answered.get("css") or "").strip()
-        if not css:
-            raise ArtifactUnavailable("The design model returned no stylesheet.")
+        # Two attempts. A stylesheet is the longest thing this app asks a model
+        # for in one go, and the failure — nothing usable coming back — costs
+        # the whole deck.
+        look = None
+        for attempt in range(2):
+            written = Written()
+            async for _ in self._model.write(DESIGN_SYSTEM, asked, written, temperature=0.6):
+                pass
+            look = _read_look(written.text)
+            if look.css:
+                break
+            logger.info("no stylesheet on attempt %d", attempt + 1)
+        if look is None or not look.css:
+            raise ArtifactUnavailable(
+                "The design model could not settle on a look for this deck."
+            )
 
-        display = str(answered.get("display_font") or "Playfair Display").strip()
-        body = str(answered.get("body_font") or "Work Sans").strip()
         spec = DesignSpec(
-            movement=str(answered.get("movement") or "Plain Speaking"),
-            rationale=str(answered.get("rationale") or ""),
-            palette=_palette(css),
-            display_font=display,
-            body_font=body,
+            movement=look.movement or "Plain Speaking",
+            rationale=look.why,
+            palette=_palette(look.css),
+            display_font=look.display_font,
+            body_font=look.body_font,
             width=self.canvas.width,
             height=self.canvas.height,
         )
         deck = Deck(
             title=str(outline.get("title") or "Deck")[:200],
-            css=css,
+            css=look.css,
             width=self.canvas.width,
             height=self.canvas.height,
-            fonts=(display, body),
+            fonts=(look.display_font, look.body_font),
         )
         return deck, spec
 
@@ -378,7 +401,7 @@ class SlidesKind:
         self,
         deck: Deck,
         slides: Sequence[Slide],
-        photos: dict[int, Photo],
+        variables: dict[int, str],
         count: int,
         sections: dict[int, str],
     ) -> AsyncIterator[BuildUpdate]:
@@ -388,7 +411,7 @@ class SlidesKind:
 
         async def write(index: int) -> tuple[int, str]:
             async with limit:
-                return index, await self._one_slide(deck, slides[index], photos.get(index))
+                return index, await self._one_slide(deck, slides[index], variables.get(index))
 
         pending = [asyncio.create_task(write(i)) for i in range(len(slides))]
         try:
@@ -414,7 +437,7 @@ class SlidesKind:
             for task in pending:
                 task.cancel()
 
-    async def _one_slide(self, deck: Deck, slide: Slide, photo: Photo | None) -> str:
+    async def _one_slide(self, deck: Deck, slide: Slide, variable: str | None) -> str:
         system = "\n".join(
             [
                 SLIDE_SYSTEM,
@@ -423,12 +446,18 @@ class SlidesKind:
                 deck.css,
             ]
         )
-        if photo is not None:
+        if variable is not None:
             system += (
-                f"\n\nA photograph has been found for this slide, in the CSS variable "
-                f"`{variable_for(0)}`. Use it with `background-image: var({variable_for(0)})`, "
-                "`background-size: cover`. Put a scrim over it and keep every word "
-                "readable against the darkest part of it. Never write an image URL."
+                f"\n\nA PHOTOGRAPH HAS BEEN FOUND FOR THIS SLIDE. It is already in "
+                f"the document, in the CSS variable `{variable}`, and this slide is "
+                f"the only one that may use it. Put it on the slide: "
+                f"`background-image: var({variable})` with `background-size: cover` "
+                "and `background-position: center`, on the section itself or on a "
+                "panel within it. Lay a scrim over it and keep every word readable "
+                "against its lightest and darkest parts. This is not optional — the "
+                "slide was planned around having a picture, and a slide that ignores "
+                f"it ships the photograph's weight and shows nothing. Use "
+                f"`var({variable})` and never an image URL."
             )
 
         asked = (
@@ -464,6 +493,40 @@ class SlidesKind:
 # -- helpers -------------------------------------------------------------
 
 
+def _photo_variables(photos: dict[int, Photo]) -> tuple[list[Photo], dict[int, str]]:
+    """The pictures in the order they will be attached, and the variable each
+    slide should ask for.
+
+    `attach_photos` names a picture after its position in the list it is
+    given, so the list and the names the slide writers are told have to be
+    decided in the same breath. Deciding them separately is how a slide is
+    told about `--photo` while its own picture sits in `--photo-2`, and puts
+    another slide's photograph behind its words.
+    """
+    ordered = sorted(photos.items())
+    return (
+        [photo for _, photo in ordered],
+        {index: variable_for(place) for place, (index, _) in enumerate(ordered)},
+    )
+
+
+def _photos_in_use(
+    html: str, ordered: Sequence[Photo], variables: dict[int, str]
+) -> list[Photo | None]:
+    """The pictures some slide actually referred to, with the rest left as
+    holes so the names of the ones that remain do not move.
+
+    A slide is told a photograph was found for it and sometimes writes a
+    slide that never mentions it. Embedding it anyway costs a hundred
+    kilobytes of base64 in every copy of the deck, to show nobody anything.
+    """
+    used = {name for name in variables.values() if f"var({name})" in html}
+    return [
+        photo if variable_for(place) in used else None
+        for place, photo in enumerate(ordered)
+    ]
+
+
 def _context(brief: Brief) -> str:
     parts = [f'<brief type="title">{brief.title}</brief>', f"<brief>{brief.brief}</brief>"]
     if brief.style_hints.strip():
@@ -487,6 +550,38 @@ def _section_of(text: str, layout: str) -> str:
     # No section at all. Wrap what came back rather than dropping the slide;
     # the stylesheet still applies and the words are still there.
     return f'<section class="slide slide--{layout}">{cleaned}</section>'
+
+
+def _read_look(text: str) -> Look:
+    """Four header lines, a marker, then the stylesheet.
+
+    Read line by line rather than parsed, because the whole point of the format
+    is that the stylesheet does not have to survive being a JSON string value —
+    quotes and newlines in CSS are what broke that.
+    """
+    cleaned = strip_fence(text)
+    head, _, css = cleaned.partition(CSS_MARKER)
+    if not css.strip():
+        # A model that ignored the marker but wrote CSS anyway. The first brace
+        # is where the stylesheet starts.
+        brace = cleaned.find(":root")
+        if brace == -1:
+            return Look()
+        head, css = cleaned[:brace], cleaned[brace:]
+
+    fields: dict[str, str] = {}
+    for line in head.splitlines():
+        name, sep, value = line.partition(":")
+        if sep and name.strip().upper() in {"MOVEMENT", "DISPLAY", "BODY", "WHY"}:
+            fields[name.strip().upper()] = value.strip()
+
+    return Look(
+        movement=fields.get("MOVEMENT", "")[:60],
+        display_font=fields.get("DISPLAY") or "Playfair Display",
+        body_font=fields.get("BODY") or "Work Sans",
+        why=fields.get("WHY", "")[:200],
+        css=strip_fence(css).strip(),
+    )
 
 
 def _stylesheet_of(html: str) -> str:

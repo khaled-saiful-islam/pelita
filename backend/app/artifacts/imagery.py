@@ -252,8 +252,14 @@ _ANY_DECLARATION = re.compile(
 _ROOT_BLOCK = re.compile(r"(:root\s*\{)([^{}]*)(\})", re.IGNORECASE | re.S)
 
 
-def attach_photos(document: str, photos: Sequence[Photo]) -> str:
+def attach_photos(document: str, photos: Sequence[Photo | None]) -> str:
     """Put the pictures into the document's `:root`, and make sure they stay.
+
+    A slot may be empty. A picture's name comes from its position, so a
+    picture nobody ended up using cannot simply be dropped from the list —
+    that would rename every picture after it, and a slide asking for
+    `--photo-2` would get somebody else's photograph. It is left out as a
+    hole instead, and the names either side of it do not move.
 
     Two things have to be true, and only the first is obvious.
 
@@ -266,13 +272,13 @@ def attach_photos(document: str, photos: Sequence[Photo]) -> str:
     So any declaration already there is removed first, ours are appended at the
     end of the block, and there is exactly one of each.
     """
-    if not photos:
-        return document
-
     declarations = "".join(
         f'  {variable_for(index)}: url("{photo.data_uri}");\n'
         for index, photo in enumerate(photos)
+        if photo is not None
     )
+    if not declarations:
+        return document
 
     root = _ROOT_BLOCK.search(document)
     if root is not None:

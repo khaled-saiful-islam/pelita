@@ -34,8 +34,9 @@ from app.providers.base import UsageEvent as ProviderUsageEvent
 logger = logging.getLogger(__name__)
 
 # A model told "no fence" produces one often enough that stripping it is
-# cheaper than a retry.
-_FENCE = re.compile(r"^\s*```(?:html|json)?\s*|\s*```\s*$", re.IGNORECASE)
+# cheaper than a retry. Any language tag, not a list of the ones seen so far:
+# a stylesheet came back as ```css and was thrown away for it.
+_FENCE = re.compile(r"^\s*```[a-z]*\s*|\s*```\s*$", re.IGNORECASE)
 
 
 @dataclass

@@ -125,7 +125,7 @@ class ArtifactDesignEvent:
 class ArtifactPartEvent:
     """One piece of a multi-part artifact, ready to look at.
 
-    A ten-slide deck takes a minute or two. Showing slide one as soon as it
+    A deck takes a minute or two. Showing slide one as soon as it
     exists turns that into something happening rather than something waited
     for.
     """

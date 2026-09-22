@@ -82,8 +82,10 @@ Slides are written at once and **reported in order**. Out of sequence they
 arrive as a jumble. The plan is announced before any slide exists, so the panel
 puts up the whole shape and fills it in.
 
-Ten slides take about two minutes, of which the first seventy seconds are
-deciding what to say and how it should look.
+Five slides — the default when nobody says a number — take about ninety
+seconds, of which the first seventy are deciding what to say and how it should
+look. That fixed cost is why the default is five and not ten: the second five
+slides roughly double the wait.
 
 **Navigating**: previous and next, a counter with the current heading, arrow
 keys, Home and End, and a filmstrip of real thumbnails. The deck is loaded once
@@ -253,8 +255,8 @@ documented failure of every implementation that has tried it.
 - **A found photograph is somebody else's.** The source page is recorded on the
   artifact, but nothing checks its licence.
 - **One artifact per turn.** Two would race for the same panel.
-- **A deck takes about two minutes** for ten slides, and costs roughly four
-  times a poster.
+- **A deck takes about ninety seconds** for the default five slides, and
+  costs roughly twice a poster. Ten slides is about two minutes.
 - **Speaker notes are in the file but nothing shows them yet.** They are
   `display: none`, waiting for a present mode.
 - **A build is 40–90 seconds**, roughly half of it refinement.
