@@ -70,17 +70,27 @@ class SandboxPolicy:
         share link. `sandbox` here does what the iframe attribute does for the
         preview — the document gets an opaque origin, so it cannot read a cookie
         or call the API with one."""
-        parts = [
-            f"sandbox{' allow-scripts' if self.scripts else ''}",
-            "default-src 'none'",
-            f"script-src {'https:' if self.scripts else "'none'"}",
-            "style-src 'unsafe-inline'" + (" https://fonts.googleapis.com" if self.fonts else ""),
-            "font-src" + (" https://fonts.gstatic.com data:" if self.fonts else " 'none'"),
-            "img-src" + (" data: https:" if self.images else " data:"),
-            "form-action 'none'",
-            "base-uri 'none'",
-        ]
-        return "; ".join(parts)
+        sandbox = "sandbox allow-scripts" if self.scripts else "sandbox"
+        script_src = "https:" if self.scripts else "'none'"
+        style_src = "'unsafe-inline'"
+        font_src = "'none'"
+        if self.fonts:
+            style_src += " https://fonts.googleapis.com"
+            font_src = "https://fonts.gstatic.com data:"
+        img_src = "data: https:" if self.images else "data:"
+
+        return "; ".join(
+            [
+                sandbox,
+                "default-src 'none'",
+                f"script-src {script_src}",
+                f"style-src {style_src}",
+                f"font-src {font_src}",
+                f"img-src {img_src}",
+                "form-action 'none'",
+                "base-uri 'none'",
+            ]
+        )
 
 
 @dataclass(frozen=True, slots=True)

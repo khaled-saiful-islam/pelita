@@ -25,9 +25,17 @@ ALLOWED_HOSTS = ("fonts.googleapis.com", "fonts.gstatic.com")
 
 _URL = re.compile(r"https?://([^/\s\"')]+)", re.IGNORECASE)
 _CSS_URL = re.compile(r"url\(\s*['\"]?(?!data:)([^)'\"]+)", re.IGNORECASE)
-_NOWRAP_HEADING = re.compile(
-    r"(h1|h2|h3|\.headline|\.title)[^{}]*\{[^{}]*white-space\s*:\s*nowrap", re.IGNORECASE | re.S
-)
+_NOWRAP = re.compile(r"white-space\s*:\s*nowrap", re.IGNORECASE)
+# Window units. The poster is looked at in a panel, in its own tab, in a shared
+# page and on paper -- four different windows and one correct size.
+_WINDOW_UNITS = re.compile(r"\b\d*\.?\d+(vh|vw|vmin|vmax)\b", re.IGNORECASE)
+_FIXED = re.compile(r"position\s*:\s*fixed", re.IGNORECASE)
+_SCROLLS = re.compile(r"overflow(-[xy])?\s*:\s*(auto|scroll)", re.IGNORECASE)
+_CANVAS_RULE = re.compile(r"\.canvas[^{}]*\{([^{}]*)\}", re.IGNORECASE | re.S)
+_RULE = re.compile(r"([^{}@]+)\{([^{}]*)\}", re.S)
+_HIDDEN = re.compile(r"overflow(-[xy])?\s*:\s*hidden", re.IGNORECASE)
+_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+_BODY_MARGIN = re.compile(r"(html|body)[^{}]*\{[^{}]*margin\s*:\s*0", re.IGNORECASE | re.S)
 # A document that stopped mid-token. The last thing a complete one says is a
 # closing tag.
 _ENDS_CLOSED = re.compile(r"</\s*html\s*>\s*$", re.IGNORECASE)
@@ -160,12 +168,68 @@ def _invented(reader: _Reader) -> list[Finding]:
 
 
 def _fit(style: str, spec: DesignSpec) -> list[Finding]:
+    """The structural causes of a poster that does not fit its frame.
+
+    None of this proves a layout fits — that needs real font metrics and a real
+    browser, and the panel measures it for real before anyone sees the result.
+    These are the causes that can be found in the text, and each one of them
+    has produced a clipped poster.
+    """
     findings = []
-    if _NOWRAP_HEADING.search(style):
+    canvas = _CANVAS_RULE.search(style)
+    canvas_rule = canvas.group(1) if canvas else ""
+
+    if _NOWRAP.search(style):
         findings.append(
             Finding(
-                "A heading is set to white-space: nowrap",
-                "a long title runs off the page instead of wrapping",
+                "Something is set to white-space: nowrap",
+                "long text runs past the edge instead of wrapping",
+            )
+        )
+    units = {match[0].lower() for match in _WINDOW_UNITS.findall(style)}
+    if units:
+        findings.append(
+            Finding(
+                f"The poster is sized in {', '.join(sorted(units))}",
+                "those measure the browser window, and this is looked at in a "
+                "panel, a tab, a shared page and on paper - use px, %, em or rem",
+            )
+        )
+    if _FIXED.search(style):
+        findings.append(
+            Finding("Something uses position: fixed", "it escapes the canvas entirely")
+        )
+    clipping = [
+        selector.strip().replace("\n", " ")
+        for selector, body in _RULE.findall(style)
+        if _HIDDEN.search(body) and ".canvas" not in selector
+    ]
+    if clipping:
+        findings.append(
+            Finding(
+                f"{clipping[0]} clips its own content",
+                "only the canvas may clip - a text block set to overflow: "
+                "hidden cuts the descenders off its own headline",
+            )
+        )
+    if _SCROLLS.search(style):
+        findings.append(
+            Finding("Something scrolls", "a poster is one page, not a scrolling area")
+        )
+    if canvas and "hidden" not in canvas_rule:
+        findings.append(
+            Finding(
+                "The canvas does not set overflow: hidden",
+                "without it a poster that is slightly too tall shares and "
+                "prints with a scrollbar and a cut edge",
+            )
+        )
+    if not _BODY_MARGIN.search(style):
+        findings.append(
+            Finding(
+                "The page margin is not zeroed",
+                "the browser's default margin pushes the canvas off-centre and "
+                "adds a scrollbar in its own tab",
             )
         )
     if spec.width and f"{spec.width}px" not in style:
@@ -175,7 +239,9 @@ def _fit(style: str, spec: DesignSpec) -> list[Finding]:
                 f"expected {spec.width}px by {spec.height}px",
             )
         )
-    if "background" not in style:
+    # Looked for on the canvas rule itself, not anywhere in the stylesheet: a
+    # background on `body` does not stop the canvas inheriting the panel's.
+    if canvas and "background" not in canvas_rule:
         findings.append(
             Finding(
                 "The canvas sets no background",
@@ -191,7 +257,9 @@ def check(
     """Everything wrong with this document, in the order worth fixing."""
     reader = _Reader()
     reader.feed(document)
-    style = reader.style_text
+    # Comments out first, so a rule's name in a finding is the selector and not
+    # whatever the model wrote above it.
+    style = _COMMENT.sub("", reader.style_text)
 
     findings = [
         *_structure(reader, document),

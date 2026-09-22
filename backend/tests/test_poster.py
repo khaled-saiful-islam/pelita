@@ -65,7 +65,9 @@ def poster_html(width: int = 1080, height: int = 1350) -> str:
     return (
         "<!DOCTYPE html><html><head><style>"
         ":root{--ground:#12151C}"
-        f".canvas{{width:{width}px;height:{height}px;background:var(--ground)}}"
+        "html,body{margin:0;padding:0;background:#000}"
+        f".canvas{{width:{width}px;height:{height}px;overflow:hidden;"
+        "display:flex;flex-direction:column;background:var(--ground)}"
         "</style></head>"
         '<body><div class="canvas"><h1>Jazz</h1></div></body></html>'
     )
@@ -364,4 +366,4 @@ def test_the_prompts_have_not_drifted() -> None:
     """One hash over all three, so a change to the product is a change to this
     line. If you meant it, update the digest in the same commit as the prompt."""
     combined = "\n".join([DIRECTION_SYSTEM, COMPOSE_SYSTEM, REFINE_SYSTEM]).encode()
-    assert hashlib.sha256(combined).hexdigest()[:16] == "9232350654df8a6c"
+    assert hashlib.sha256(combined).hexdigest()[:16] == "7a1dc01932f32d19"

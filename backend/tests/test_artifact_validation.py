@@ -18,7 +18,9 @@ STATIC = SandboxPolicy(scripts=False)
 GOOD = """<!DOCTYPE html>
 <html><head><style>
 :root { --ground: #101010; }
-.canvas { width: 794px; height: 1123px; background: var(--ground); }
+html, body { margin: 0; padding: 0; background: #050403; }
+.canvas { width: 794px; height: 1123px; overflow: hidden;
+          display: flex; flex-direction: column; background: var(--ground); }
 h1 { text-wrap: balance; }
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora">
@@ -88,9 +90,71 @@ def test_the_font_host_is_not_an_invented_link() -> None:
     assert "The document links to a URL nobody supplied" not in failures(GOOD)
 
 
-def test_a_nowrap_heading_is_caught() -> None:
-    assert "A heading is set to white-space: nowrap" in failures(
-        GOOD.replace("h1 { text-wrap: balance; }", "h1 { white-space: nowrap; }")
+def test_nowrap_anywhere_is_caught() -> None:
+    """Not just headings. Any line of words that cannot wrap runs off the
+    edge, and the detail row is where it usually happens."""
+    assert "Something is set to white-space: nowrap" in failures(
+        GOOD.replace("h1 { text-wrap: balance; }", ".details { white-space: nowrap; }")
+    )
+
+
+@pytest.mark.parametrize("unit", ["vh", "vw", "vmin", "vmax"])
+def test_window_units_are_caught(unit: str) -> None:
+    """They measure the browser window. This poster is looked at in a panel, in
+    its own tab, in a shared page and on paper - four windows, one right size."""
+    broken = GOOD.replace("height: 1123px;", f"height: 100{unit};")
+    assert any(f.startswith("The poster is sized in") for f in failures(broken))
+
+
+def test_position_fixed_is_caught() -> None:
+    assert "Something uses position: fixed" in failures(
+        GOOD.replace("h1 { text-wrap: balance; }", "h1 { position: fixed; }")
+    )
+
+
+def test_something_that_scrolls_is_caught() -> None:
+    assert "Something scrolls" in failures(
+        GOOD.replace("h1 { text-wrap: balance; }", ".body { overflow-y: scroll; }")
+    )
+
+
+def test_a_text_block_that_clips_itself_is_caught() -> None:
+    """The defect that produced a headline with the tail cut off its g. It
+    looks like a broken font rather than a layout mistake, so it is missed
+    every time a person eyeballs the result."""
+    found = failures(
+        GOOD.replace("h1 { text-wrap: balance; }", ".headline { overflow: hidden; }")
+    )
+    assert any("clips its own content" in f for f in found)
+
+
+def test_a_comment_above_a_rule_is_not_mistaken_for_its_name() -> None:
+    found = failures(
+        GOOD.replace(
+            "h1 { text-wrap: balance; }",
+            "/* the smeared reflection */ .headline { overflow: hidden; }",
+        )
+    )
+    assert any(f.startswith(".headline") for f in found)
+
+
+def test_only_the_canvas_may_clip() -> None:
+    assert not any("clips its own content" in f for f in failures(GOOD))
+
+
+def test_a_canvas_that_does_not_clip_is_caught() -> None:
+    """Without it, a poster one line too tall shares and prints with a
+    scrollbar and a cut edge instead of being exactly the frame."""
+    assert "The canvas does not set overflow: hidden" in failures(
+        GOOD.replace("overflow: hidden;", "")
+    )
+
+
+def test_an_unzeroed_page_margin_is_caught() -> None:
+    """The browser's default margin pushes the canvas off-centre and adds a
+    scrollbar the moment it is opened in its own tab."""
+    assert "The page margin is not zeroed" in failures(
+        GOOD.replace("html, body { margin: 0; padding: 0; background: #050403; }", "")
     )
 
 
@@ -104,6 +168,12 @@ def test_a_canvas_with_no_background_is_caught() -> None:
     """It inherits whatever is behind it, so half the time it is unreadable."""
     assert "The canvas sets no background" in failures(
         GOOD.replace("background: var(--ground);", "")
+    )
+    # A background on body is not the canvas's own.
+    assert "The canvas sets no background" in failures(
+        GOOD.replace("background: var(--ground);", "").replace(
+            "background: #050403;", "background: #050403;"
+        )
     )
 
 

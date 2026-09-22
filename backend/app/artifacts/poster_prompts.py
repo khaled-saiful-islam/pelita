@@ -142,17 +142,55 @@ OUTPUT
   SVG primitives. Evoke it with palette and abstract form instead.
 
 THE CANVAS
-- One root element, class "canvas", at exactly the width and height given.
-- It sets its own background explicitly. A poster that inherits its ground from
-  whatever is behind it is unreadable half the time.
-- Everything fits inside it. Nothing clips, nothing overflows, nothing is cut
-  off at an edge, and no two elements overlap unless one is the single
-  full-bleed background layer.
-- Include a print rule so the document prints as the poster and not as a web
-  page:
-      @page { size: A4; margin: 0; }
-      @media print { .canvas { -webkit-print-color-adjust: exact;
-                               print-color-adjust: exact; } }
+
+Start the stylesheet with exactly this, substituting the width and height you
+were given and your own ground colour. It is not a suggestion: a poster is
+shared, opened in its own tab and printed, and these are what make it the same
+object in all three.
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: <your darkest ground>; }
+    body { display: flex; align-items: center; justify-content: center;
+           min-height: 100%; }
+    .canvas { width: <W>px; height: <H>px; overflow: hidden;
+              position: relative; display: flex; flex-direction: column;
+              background: <your ground>; }
+    @page { size: <W>px <H>px; margin: 0; }
+    @media print { html, body { display: block; }
+                   .canvas { -webkit-print-color-adjust: exact;
+                             print-color-adjust: exact; } }
+
+THE RULE THAT MATTERS MOST: EVERYTHING FITS
+
+The canvas is the whole poster. Nothing may extend past its edges, and nothing
+may be cut off at them. This is the one failure a person sees immediately and
+cannot forgive, and it outranks every aesthetic decision you would otherwise
+make.
+
+- Never use vh, vw, vmin or vmax anywhere. They measure the browser window,
+  and this poster will be looked at in a panel, in its own tab, in a shared
+  page and on paper - four different windows and one correct size. Every
+  length is px, %, em or rem.
+- Never `position: fixed`. Never `overflow: auto` or `overflow: scroll` on
+  anything inside the canvas.
+- `overflow: hidden` belongs on the canvas and nowhere else. On a text block it
+  cuts the descenders off its own headline - the tail of a g or a y - which
+  looks like a broken font rather than a layout mistake and is missed every
+  time.
+- Give any large display text a `line-height` with room for descenders (1.05 or
+  more, never 0.8), and never a fixed `height` on the element holding it.
+- Do not give inner blocks fixed heights that have to add up. Let the flex
+  column distribute the space: `gap` between sections, `flex: 1` or
+  `margin-top: auto` on the one section that should absorb what is left.
+- Never `white-space: nowrap` on anything containing words. Long text wraps;
+  it does not run off the edge.
+- Add `overflow-wrap: anywhere` to any block that shows text you were given
+  rather than text you wrote. A place name or a price can be longer than you
+  expect.
+- Budget the type to the copy you actually have. If the brief gives you four
+  lines of detail, a 180px headline plus four lines does not fit an A4 page -
+  bring the headline down until it does. A smaller headline that fits beats a
+  bigger one that is cut in half, every time.
 
 COLOUR, MECHANICALLY
 - Declare the palette once as custom properties on :root, named exactly as the
