@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from app.artifacts.base import Built
 from app.providers.base import ToolResult
 
 
@@ -73,7 +74,44 @@ class Results:
     items: tuple[ToolResult, ...]
 
 
-ToolUpdate = Progress | Results
+@dataclass(frozen=True, slots=True)
+class Making:
+    """A tool has begun making an artifact.
+
+    Sent before the first step so the panel can open and say what is coming,
+    rather than appearing fully formed a minute later.
+    """
+
+    kind: str
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class Drafting:
+    """A piece of an artifact's source, as it is being written.
+
+    Streamed so the panel can show the document arriving. The preview waits for
+    the finished one — a half-written document renders as a broken one, and
+    watching a layout thrash is worse than watching code arrive.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class Made:
+    """A finished artifact, handed back for the caller to store.
+
+    The tool makes it; it does not save it. Storing needs the conversation, the
+    message and a session, none of which a tool has any business holding.
+    """
+
+    kind: str
+    title: str
+    built: Built
+
+
+ToolUpdate = Progress | Results | Making | Drafting | Made
 
 
 @runtime_checkable

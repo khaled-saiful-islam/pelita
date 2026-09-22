@@ -76,6 +76,55 @@ class SuggestionsEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactStartEvent:
+    """Something is being made. Sent before the first step, so the panel can
+    open and say so rather than appearing fully formed a minute later."""
+
+    kind: str
+    title: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactStepEvent:
+    """Which phase the build is in.
+
+    Honest because the build genuinely has phases. A single opaque call would
+    have nothing to report, and a progress bar that reports nothing is a lie
+    with a nicer appearance.
+    """
+
+    label: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactDeltaEvent:
+    """The document as it is written, for the source view."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactDoneEvent:
+    artifact_id: UUID
+    kind: str
+    title: str
+    version: int
+    size_bytes: int
+    width: int
+    height: int
+    # What the checks still found after the one repair. Shown quietly rather
+    # than hidden: the poster is worth having, and the person should know.
+    findings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactFailedEvent:
+    message: str
+    retryable: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class DoneEvent:
     finish_reason: FinishReason
 
@@ -94,6 +143,11 @@ ChatEvent = (
     | DeltaEvent
     | AccountingEvent
     | SuggestionsEvent
+    | ArtifactStartEvent
+    | ArtifactStepEvent
+    | ArtifactDeltaEvent
+    | ArtifactDoneEvent
+    | ArtifactFailedEvent
     | DoneEvent
     | ErrorEvent
 )

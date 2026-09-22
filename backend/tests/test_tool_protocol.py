@@ -92,8 +92,21 @@ class WeatherTool(Tool):
 # --- the protocol -------------------------------------------------------
 
 
+def only_search(*, serpapi_key: str = "k") -> Settings:
+    """Settings with search on and everything else off.
+
+    Spelled out rather than relying on defaults, because a Settings built in a
+    container still reads that container's environment, and a test that happens
+    to pass because of a variable somebody set is a test that fails for the
+    next person.
+    """
+    return Settings(  # type: ignore[call-arg]
+        _env_file=None, serpapi_key=serpapi_key, artifact_model=""
+    )
+
+
 def test_the_shipped_tools_satisfy_the_protocol() -> None:
-    tools = build_tools(Settings(_env_file=None, serpapi_key="k"))  # type: ignore[call-arg]
+    tools = build_tools(only_search())
     assert set(tools) == {"web_search", "image_search"}
     assert all(isinstance(tool, Tool) for tool in tools.values())
 
@@ -101,12 +114,12 @@ def test_the_shipped_tools_satisfy_the_protocol() -> None:
 def test_tools_that_need_a_key_do_not_exist_without_one() -> None:
     """The UI reads this through /api/config and disables the control, rather
     than offering a button that always fails."""
-    assert build_tools(Settings(_env_file=None, serpapi_key="")) == {}  # type: ignore[call-arg]
+    assert build_tools(only_search(serpapi_key="")) == {}
 
 
 def test_every_tool_describes_itself_well_enough_for_a_model_to_choose() -> None:
     """A tool-calling loop builds its schema from these, so they cannot be blank."""
-    for tool in build_tools(Settings(_env_file=None, serpapi_key="k")).values():  # type: ignore[call-arg]
+    for tool in build_tools(only_search()).values():
         assert tool.description.strip()
         assert tool.parameters.get("type") == "object"
         assert tool.parameters.get("required")

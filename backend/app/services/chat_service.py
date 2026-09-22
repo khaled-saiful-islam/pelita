@@ -43,6 +43,7 @@ from app.core.errors import NotFoundError, ValidationError
 from app.core.tokens import count_message_tokens, count_tokens
 from app.db.models.conversation import Conversation, Message
 from app.db.models.source import MessageSource
+from app.db.repositories.artifacts import SqlArtifactRepository
 from app.db.repositories.conversations import SqlConversationRepository
 from app.guards.base import ContentSource, Guard, GuardVerdict
 from app.providers.base import (
@@ -66,6 +67,10 @@ from app.services.cancellation import CancellationRegistry
 from app.services.document_service import DocumentService
 from app.services.events import (
     AccountingEvent,
+    ArtifactDeltaEvent,
+    ArtifactDoneEvent,
+    ArtifactStartEvent,
+    ArtifactStepEvent,
     ChatEvent,
     DeltaEvent,
     DoneEvent,
@@ -82,6 +87,9 @@ from app.services.memory_service import MemoryService
 from app.services.search_intent import SearchDecision, decide
 from app.services.suggestion_service import suggest
 from app.tools.base import (
+    Drafting,
+    Made,
+    Making,
     Progress,
     ProgressiveTool,
     Results,
@@ -138,6 +146,9 @@ class TurnState:
     """
 
     question: str
+    conversation_id: UUID | None = None
+    user_id: UUID | None = None
+    assistant_id: UUID | None = None
     history: tuple[StoredMessage, ...] = ()
     language: str | None = None
     tool_results: tuple[ToolResult, ...] = ()
@@ -258,6 +269,11 @@ class ChatService:
         search_mode: str = "auto",
     ) -> AsyncIterator[ChatEvent]:
         start, state = await self._open(user_id, conversation_id, content, regenerate_of)
+        # Where this turn is happening, so anything it makes can be stored
+        # against the right conversation and the right answer.
+        state.conversation_id = start.conversation_id
+        state.user_id = user_id
+        state.assistant_id = start.assistant_message_id
         yield start
 
         assistant_id = start.assistant_message_id
@@ -409,15 +425,33 @@ class ChatService:
 
         started = perf_counter()
         found = 0
+        made = 0
+        making = False
         try:
             async for update in _updates(tool, arguments):
+                if isinstance(update, Making):
+                    making = True
+                    yield ArtifactStartEvent(kind=update.kind, title=update.title)
+                    continue
                 if isinstance(update, Progress):
+                    # Only a build has steps worth naming on the panel. A tool
+                    # that merely narrates keeps its chip and nothing more.
+                    if making:
+                        yield ArtifactStepEvent(label=update.label, detail=update.detail)
                     yield ToolEvent(
                         tool=tool.name,
                         status="running",
                         label=update.label,
                         detail=update.detail,
                     )
+                    continue
+                if isinstance(update, Drafting):
+                    yield ArtifactDeltaEvent(text=update.text)
+                    continue
+                if isinstance(update, Made):
+                    made += 1
+                    async for event in self._keep(state, update, sink):
+                        yield event
                     continue
                 found += len(update.items)
                 for event in self._record(state, update.items, sink):
@@ -437,8 +471,61 @@ class ChatService:
             tool=tool.name,
             status="done",
             label=tool.presentation.done,
-            detail=_summarise(found, tool.presentation.noun, started),
+            detail=_summarise(made or found, tool.presentation.noun, started),
         )
+
+    async def _keep(
+        self, state: TurnState, made: Made, sink: list[str] | None
+    ) -> AsyncIterator[ChatEvent]:
+        """Store what a tool made, and tell the panel where to find it.
+
+        Saved here rather than in the tool: a tool has no business holding a
+        session, and this is the one place that knows which conversation and
+        which answer it belongs to.
+        """
+        if state.conversation_id is None or state.user_id is None:
+            # Nothing to attach it to. Only reachable from a test that drives
+            # the phase directly.
+            return
+
+        built = made.built
+        async with self._session_maker() as session:
+            repo = SqlArtifactRepository(session)
+            artifact = await repo.create(
+                conversation_id=state.conversation_id,
+                user_id=state.user_id,
+                message_id=state.assistant_id,
+                kind=made.kind,
+                title=made.title,
+                html=built.html,
+                design_spec=built.spec.as_dict(),
+                model=built.model,
+                prompt_tokens=built.prompt_tokens,
+                completion_tokens=built.completion_tokens,
+                build_ms=built.build_ms,
+            )
+            await session.commit()
+            artifact_id, version = artifact.id, artifact.current_version
+
+        yield ArtifactDoneEvent(
+            artifact_id=artifact_id,
+            kind=made.kind,
+            title=made.title,
+            version=version,
+            size_bytes=len(built.html.encode()),
+            width=built.spec.width,
+            height=built.spec.height,
+            findings=built.findings,
+        )
+        if sink is not None:
+            # What the model reads next. It must not be the document: the
+            # person can see it, and replaying thousands of tokens of CSS into
+            # the next request buys nothing and costs everything.
+            sink.append(
+                f"The {made.kind} \"{made.title}\" is made and is on screen next to "
+                "the conversation. Tell them briefly what you made and what they "
+                "can change. Do not describe the markup and do not repeat the text on it."
+            )
 
     def _record(
         self, state: TurnState, found: tuple[ToolResult, ...], sink: list[str] | None

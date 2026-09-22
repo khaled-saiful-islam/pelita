@@ -21,6 +21,11 @@ from app.api.schemas.chat import FeedbackRequest, FeedbackResponse, SendMessageR
 from app.core.errors import PelitaError
 from app.services.events import (
     AccountingEvent,
+    ArtifactDeltaEvent,
+    ArtifactDoneEvent,
+    ArtifactFailedEvent,
+    ArtifactStartEvent,
+    ArtifactStepEvent,
     DeltaEvent,
     DoneEvent,
     ErrorEvent,
@@ -114,6 +119,41 @@ def _to_sse(event: object) -> dict[str, str] | None:
                             for s in event.sources
                         ]
                     }
+                ),
+            }
+        case ArtifactStartEvent():
+            return {
+                "event": "artifact.start",
+                "data": json.dumps({"kind": event.kind, "title": event.title}),
+            }
+        case ArtifactStepEvent():
+            return {
+                "event": "artifact.step",
+                "data": json.dumps({"label": event.label, "detail": event.detail}),
+            }
+        case ArtifactDeltaEvent():
+            return {"event": "artifact.delta", "data": json.dumps({"text": event.text})}
+        case ArtifactDoneEvent():
+            return {
+                "event": "artifact.done",
+                "data": json.dumps(
+                    {
+                        "artifact_id": str(event.artifact_id),
+                        "kind": event.kind,
+                        "title": event.title,
+                        "version": event.version,
+                        "size_bytes": event.size_bytes,
+                        "width": event.width,
+                        "height": event.height,
+                        "findings": list(event.findings),
+                    }
+                ),
+            }
+        case ArtifactFailedEvent():
+            return {
+                "event": "artifact.failed",
+                "data": json.dumps(
+                    {"message": event.message, "retryable": event.retryable}
                 ),
             }
         case AccountingEvent():
