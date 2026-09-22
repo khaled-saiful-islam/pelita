@@ -1,8 +1,18 @@
 import { useState } from 'react'
-import { AlertTriangle, Code2, Eye, Loader2, SquareArrowOutUpRight, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  Code2,
+  Download,
+  Eye,
+  Link2,
+  Loader2,
+  SquareArrowOutUpRight,
+  X,
+} from 'lucide-react'
 import { Alert, Button } from '@/components/ui'
 import { BuildSteps } from '@/components/artifacts/BuildSteps'
 import { ArtifactFrame } from '@/components/artifacts/ArtifactFrame'
+import { ShareArtifactDialog } from '@/components/artifacts/ShareArtifactDialog'
 import { useArtifact } from '@/hooks/useArtifact'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
@@ -23,8 +33,9 @@ export function ArtifactPanel({
   build?: ArtifactBuild | null
   onClose: () => void
 }) {
-  const { artifact, fit, error, loading } = useArtifact(artifactId)
+  const { artifact, fit, error, loading, reload } = useArtifact(artifactId)
   const [showing, setShowing] = useState<'preview' | 'source'>('preview')
+  const [sharing, setSharing] = useState(false)
 
   const building = !artifactId && !!build
   const measuring = !!artifact && fit === null
@@ -38,6 +49,22 @@ export function ArtifactPanel({
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-2 sm:px-3">
         <h2 className="min-w-0 truncate text-sm font-medium">{title}</h2>
         <div className="flex shrink-0 items-center gap-1">
+          {artifact && artifact.versions.length > 1 && (
+            <select
+              aria-label="Version"
+              className="rounded-md border border-border bg-surface px-2 py-1 text-xs"
+              value={artifact.version}
+              onChange={(event) => {
+                void reload(artifact.id, Number(event.target.value))
+              }}
+            >
+              {artifact.versions.map((v) => (
+                <option key={v.version} value={v.version}>
+                  v{v.version}
+                </option>
+              ))}
+            </select>
+          )}
           {artifact && (
             <Button
               variant="ghost"
@@ -53,11 +80,34 @@ export function ArtifactPanel({
             </Button>
           )}
           {artifact && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSharing(true)}
+              title="Share a public link"
+            >
+              <Link2 className="size-4" aria-hidden />
+            </Button>
+          )}
+          {artifact && (
+            // A plain link, not fetch-and-blob: the browser already knows how
+            // to save a file the server marked as an attachment.
             <a
-              href={`/api/artifacts/${artifact.id}/raw`}
+              href={`/api/artifacts/${artifact.id}/download?version=${artifact.version}`}
+              download
+              title="Download the file"
+            >
+              <Button variant="ghost" size="sm">
+                <Download className="size-4" aria-hidden />
+              </Button>
+            </a>
+          )}
+          {artifact && (
+            <a
+              href={`/api/artifacts/${artifact.id}/raw?version=${artifact.version}`}
               target="_blank"
               rel="noreferrer noopener"
-              title="Open in a new tab"
+              title="Open in a new tab, where it can also be printed"
             >
               <Button variant="ghost" size="sm">
                 <SquareArrowOutUpRight className="size-4" aria-hidden />
@@ -123,6 +173,14 @@ export function ArtifactPanel({
           </pre>
         )}
       </div>
+
+      {sharing && artifact && (
+        <ShareArtifactDialog
+          artifactId={artifact.id}
+          version={artifact.version}
+          onClose={() => setSharing(false)}
+        />
+      )}
     </aside>
   )
 }

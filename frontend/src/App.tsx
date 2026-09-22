@@ -6,6 +6,7 @@ import Chat from '@/pages/Chat'
 import Profile from '@/pages/Profile'
 import Admin from '@/pages/Admin'
 import Shared from '@/pages/Shared'
+import SharedArtifact from '@/pages/SharedArtifact'
 import Settings from '@/pages/Settings'
 import SignIn from '@/pages/SignIn'
 
@@ -19,6 +20,7 @@ export default function App() {
           {/* Deliberately outside Protected: needing an account to read a
               shared link would defeat the entire feature. */}
           <Route path="/s/:token" element={<Shared />} />
+          <Route path="/a/:token" element={<SharedArtifact />} />
           <Route path="/" element={<Protected><Chat /></Protected>} />
           <Route path="/c/:conversationId" element={<Protected><Chat /></Protected>} />
           <Route path="/profile" element={<Protected><Profile /></Protected>} />

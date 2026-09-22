@@ -39,3 +39,12 @@ class ArtifactDetail(ArtifactSummary):
 
 class ArtifactList(BaseModel):
     items: list[ArtifactSummary]
+
+
+class ArtifactShareResponse(BaseModel):
+    token: str
+    url: str
+    title: str
+    version: int
+    view_count: int
+    created_at: datetime

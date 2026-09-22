@@ -11,22 +11,37 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, Request, Response, status
 
-from app.api.deps import CurrentUser, SessionDep, SettingsDep
+from app.api.deps import CurrentUser, SessionDep, SettingsDep, limit_share
 from app.api.schemas.artifact import (
     ArtifactDetail,
     ArtifactList,
+    ArtifactShareResponse,
     ArtifactSummary,
     ArtifactVersionSummary,
 )
 from app.artifacts.registry import build_kinds
 from app.core.errors import NotFoundError
 from app.db.models.artifact import Artifact, ArtifactVersion
+from app.db.models.artifact_share import ArtifactShare
 from app.db.repositories.artifacts import SqlArtifactRepository
+from app.services.artifact_share_service import ArtifactShareService
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 by_conversation = APIRouter(prefix="/conversations/{conversation_id}/artifacts", tags=["artifacts"])
+public_router = APIRouter(prefix="/shares/artifacts", tags=["artifacts"])
+
+# What a shared or downloaded document is served with, alongside the kind's own
+# policy. `noindex` because sharing a poster means "this person I sent it to"
+# and not "the web"; `no-store` because a public cache holding someone's poster
+# outlives their decision to revoke the link.
+PUBLIC_HEADERS = {
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
 
 
 def _size(version: ArtifactVersion) -> tuple[int, int]:
@@ -124,3 +139,112 @@ async def listing(
         if current is not None:
             items.append(_summary(artifact, current))
     return ArtifactList(items=items)
+
+
+# -- the owner's side ----------------------------------------------------
+
+
+def _share_response(share: ArtifactShare, request: Request, settings) -> ArtifactShareResponse:
+    # `PUBLIC_BASE_URL` when set: behind a proxy the request's own host is
+    # whatever the proxy forwarded, and a link built from it can point
+    # somewhere nobody else can reach.
+    base = (settings.public_base_url or str(request.base_url)).rstrip("/")
+    return ArtifactShareResponse(
+        token=share.token,
+        url=f"{base}/a/{share.token}",
+        title=share.title,
+        version=share.version,
+        view_count=share.view_count,
+        created_at=share.created_at,
+    )
+
+
+@router.get("/{artifact_id}/share", response_model=ArtifactShareResponse | None)
+async def show_share(
+    artifact_id: UUID,
+    request: Request,
+    session: SessionDep,
+    user: CurrentUser,
+    settings: SettingsDep,
+) -> ArtifactShareResponse | None:
+    share = await ArtifactShareService(session).get(user_id=user.id, artifact_id=artifact_id)
+    return None if share is None else _share_response(share, request, settings)
+
+
+@router.post("/{artifact_id}/share", response_model=ArtifactShareResponse)
+async def create_share(
+    artifact_id: UUID,
+    request: Request,
+    session: SessionDep,
+    user: CurrentUser,
+    settings: SettingsDep,
+    version: int | None = None,
+) -> ArtifactShareResponse:
+    """Share it, or refresh an existing link with the version being looked at."""
+    share = await ArtifactShareService(session).share(
+        user_id=user.id, artifact_id=artifact_id, version=version
+    )
+    await session.commit()
+    return _share_response(share, request, settings)
+
+
+@router.delete("/{artifact_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_share(artifact_id: UUID, session: SessionDep, user: CurrentUser) -> None:
+    await ArtifactShareService(session).revoke(user_id=user.id, artifact_id=artifact_id)
+    await session.commit()
+
+
+@router.get("/{artifact_id}/download", response_class=Response)
+async def download(
+    artifact_id: UUID,
+    session: SessionDep,
+    user: CurrentUser,
+    version: int | None = None,
+) -> Response:
+    """The document as a file. It is already one — there is nothing to convert."""
+    artifact, chosen = await _load(session, artifact_id, user.id, version)
+    return Response(
+        content=chosen.html,
+        media_type="text/html; charset=utf-8",
+        headers={
+            **PUBLIC_HEADERS,
+            "Content-Disposition": f'attachment; filename="{_filename(artifact.title)}"',
+        },
+    )
+
+
+def _filename(title: str) -> str:
+    """A filename from a title, keeping only what every filesystem accepts."""
+    kept = [c if c.isalnum() or c in " -_" else "-" for c in title.strip()]
+    cleaned = "".join(kept).strip().replace(" ", "-")[:60]
+    return f"{cleaned or 'artifact'}.html"
+
+
+# -- anybody at all ------------------------------------------------------
+
+
+@public_router.get("/{token}", response_class=Response, dependencies=[Depends(limit_share)])
+async def shared(token: str, session: SessionDep, settings: SettingsDep) -> Response:
+    """A shared artifact, to anyone with the link and no account.
+
+    The only unauthenticated route in the app that returns a document. It
+    carries the kind's own sandbox policy, so a poster served here is in an
+    opaque origin and cannot do anything with the host it is served from.
+    """
+    public = await ArtifactShareService(session).view(token)
+    await session.commit()
+    kind = build_kinds(settings).get(public.kind)
+    policy = kind.sandbox.csp if kind else "sandbox; default-src 'none'"
+    return Response(
+        content=public.html,
+        media_type="text/html; charset=utf-8",
+        headers={
+            **PUBLIC_HEADERS,
+            "Content-Security-Policy": policy,
+            # The size it chose for itself. The page showing it cannot read
+            # this out of the document — that is the whole point of the opaque
+            # origin — so it is told here instead.
+            "X-Artifact-Width": str(public.width),
+            "X-Artifact-Height": str(public.height),
+        },
+    )

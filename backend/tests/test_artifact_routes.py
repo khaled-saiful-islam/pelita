@@ -148,3 +148,146 @@ async def test_an_earlier_version_can_be_read_back(api, artifact, session) -> No
     assert current["version"] == 2
     assert first["html"] == DOCUMENT
     assert [v["version"] for v in current["versions"]] == [1, 2]
+
+
+# --- sharing ------------------------------------------------------------
+
+
+async def test_a_shared_artifact_needs_no_account(api, artifact) -> None:
+    async with api as client:
+        await sign_in(client)
+        share = (await client.post(f"/api/artifacts/{artifact.id}/share")).json()
+        client.cookies.clear()
+        # No cookie at all.
+        response = await client.get(f"/api/shares/artifacts/{share['token']}")
+
+    assert response.status_code == 200
+    assert response.text == DOCUMENT
+
+
+async def test_the_token_is_the_credential(api, artifact) -> None:
+    """256 bits. The URL is the only thing protecting this, so guessing must
+    not be a strategy."""
+    from app.services.artifact_share_service import TOKEN_BYTES
+
+    async with api as client:
+        await sign_in(client)
+        share = (await client.post(f"/api/artifacts/{artifact.id}/share")).json()
+
+    assert TOKEN_BYTES == 32
+    assert len(share["token"]) >= 40
+    assert share["url"].endswith(f"/a/{share['token']}")
+
+
+async def test_a_shared_poster_cannot_use_the_host_it_is_served_from(api, artifact) -> None:
+    """The only unauthenticated route returning a document. In an opaque origin
+    it can neither read a cookie nor call the API with one."""
+    async with api as client:
+        await sign_in(client)
+        share = (await client.post(f"/api/artifacts/{artifact.id}/share")).json()
+        client.cookies.clear()
+        response = await client.get(f"/api/shares/artifacts/{share['token']}")
+
+    assert response.headers["content-security-policy"].startswith("sandbox;")
+    assert "noindex" in response.headers["x-robots-tag"]
+    assert response.headers["cache-control"] == "no-store"
+
+
+async def test_sharing_again_keeps_the_link_working(api, artifact, session) -> None:
+    """A link already sent stays alive; killing it is a different intent with
+    its own button."""
+    async with api as client:
+        await sign_in(client)
+        first = (await client.post(f"/api/artifacts/{artifact.id}/share")).json()
+        await SqlArtifactRepository(session).add_version(
+            artifact, html="<!DOCTYPE html><html><body>v2</body></html>", design_spec={}
+        )
+        second = (await client.post(f"/api/artifacts/{artifact.id}/share")).json()
+        client.cookies.clear()
+        served = await client.get(f"/api/shares/artifacts/{first['token']}")
+
+    assert second["token"] == first["token"]
+    assert second["version"] == 2
+    assert "v2" in served.text
+
+
+async def test_a_share_is_a_copy_so_a_later_edit_is_not_published(
+    api, artifact, session
+) -> None:
+    """A link that followed the artifact would republish every later edit
+    without the owner deciding to."""
+    async with api as client:
+        await sign_in(client)
+        share = (await client.post(f"/api/artifacts/{artifact.id}/share")).json()
+        await SqlArtifactRepository(session).add_version(
+            artifact, html="<html><body>SECRET</body></html>", design_spec={}
+        )
+        client.cookies.clear()
+        response = await client.get(f"/api/shares/artifacts/{share['token']}")
+
+    assert "SECRET" not in response.text
+    assert response.text == DOCUMENT
+
+
+async def test_a_revoked_link_answers_like_one_that_never_existed(api, artifact) -> None:
+    """So a token cannot be used to learn which ones are real."""
+    async with api as client:
+        await sign_in(client)
+        share = (await client.post(f"/api/artifacts/{artifact.id}/share")).json()
+        await client.delete(f"/api/artifacts/{artifact.id}/share")
+        client.cookies.clear()
+        revoked = await client.get(f"/api/shares/artifacts/{share['token']}")
+        never = await client.get("/api/shares/artifacts/nonsense-token")
+
+    assert revoked.status_code == never.status_code == 404
+    assert revoked.json() == never.json()
+
+
+async def test_revoking_twice_is_not_an_error(api, artifact) -> None:
+    async with api as client:
+        await sign_in(client)
+        await client.post(f"/api/artifacts/{artifact.id}/share")
+        assert (await client.delete(f"/api/artifacts/{artifact.id}/share")).status_code == 204
+        assert (await client.delete(f"/api/artifacts/{artifact.id}/share")).status_code == 204
+
+
+async def test_somebody_else_cannot_share_your_artifact(api, artifact, stranger) -> None:
+    async with api as client:
+        await sign_in(client, "intruder")
+        assert (await client.post(f"/api/artifacts/{artifact.id}/share")).status_code == 404
+
+
+# --- downloading --------------------------------------------------------
+
+
+async def test_downloading_gives_the_document_as_a_named_file(api, artifact) -> None:
+    async with api as client:
+        await sign_in(client)
+        response = await client.get(f"/api/artifacts/{artifact.id}/download")
+
+    assert response.status_code == 200
+    assert response.text == DOCUMENT
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="Friday-night-jazz.html"'
+    )
+
+
+async def test_a_title_that_would_break_a_filesystem_is_cleaned(
+    api, session, db_user, conversation
+) -> None:
+    made = await SqlArtifactRepository(session).create(
+        conversation_id=conversation.id,
+        user_id=db_user.id,
+        message_id=None,
+        kind="poster",
+        title="Raya / 2026: open house!",
+        html=DOCUMENT,
+        design_spec={},
+    )
+    async with api as client:
+        await sign_in(client)
+        response = await client.get(f"/api/artifacts/{made.id}/download")
+
+    disposition = response.headers["content-disposition"]
+    assert "/" not in disposition.split("filename=")[1]
+    assert disposition.endswith('.html"')

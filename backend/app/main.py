@@ -104,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix="/api")
     app.include_router(artifacts.router, prefix="/api")
     app.include_router(artifacts.by_conversation, prefix="/api")
+    app.include_router(artifacts.public_router, prefix="/api")
     app.include_router(auth.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(conversations.router, prefix="/api")
