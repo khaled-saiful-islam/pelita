@@ -24,6 +24,7 @@ from app.api.schemas.artifact import (
     ReviseRequest,
 )
 from app.artifacts.base import ArtifactUnavailable, DesignSpec, Finished
+from app.artifacts.raster import RasterUnavailable, to_png
 from app.artifacts.registry import build_kinds
 from app.artifacts.text_edit import apply_text, readable_text
 from app.core.errors import NotFoundError, ValidationError
@@ -294,16 +295,46 @@ async def download(
     artifact_id: UUID,
     session: SessionDep,
     user: CurrentUser,
+    settings: SettingsDep,
     version: int | None = None,
+    format: str = "png",
 ) -> Response:
-    """The document as a file. It is already one — there is nothing to convert."""
+    """The poster as a file.
+
+    A picture by default, because that is what a poster is for: it goes into a
+    message, a feed or a noticeboard, and none of those take an HTML file. The
+    document is still available with `format=html`, and is what to keep if you
+    ever want to edit it again.
+    """
     artifact, chosen = await _load(session, artifact_id, user.id, version)
+    name = _filename(artifact.title)
+
+    if format == "html" or not settings.artifact_export_png:
+        return Response(
+            content=chosen.html,
+            media_type="text/html; charset=utf-8",
+            headers={
+                **PUBLIC_HEADERS,
+                "Content-Disposition": f'attachment; filename="{name}.html"',
+            },
+        )
+
+    spec = chosen.design_spec or {}
+    try:
+        picture = await to_png(
+            chosen.html,
+            width=int(spec.get("width") or 794),
+            height=int(spec.get("height") or 1123),
+        )
+    except RasterUnavailable as exc:
+        raise ValidationError(str(exc)) from exc
+
     return Response(
-        content=chosen.html,
-        media_type="text/html; charset=utf-8",
+        content=picture,
+        media_type="image/png",
         headers={
             **PUBLIC_HEADERS,
-            "Content-Disposition": f'attachment; filename="{_filename(artifact.title)}"',
+            "Content-Disposition": f'attachment; filename="{name}.png"',
         },
     )
 
@@ -312,7 +343,7 @@ def _filename(title: str) -> str:
     """A filename from a title, keeping only what every filesystem accepts."""
     kept = [c if c.isalnum() or c in " -_" else "-" for c in title.strip()]
     cleaned = "".join(kept).strip().replace(" ", "-")[:60]
-    return f"{cleaned or 'artifact'}.html"
+    return cleaned or "artifact"
 
 
 # -- anybody at all ------------------------------------------------------

@@ -45,8 +45,13 @@ async def lifespan(app: FastAPI):
     _check_deployment_safety()
 
     yield
+
+    # The renderer holds a browser process; a reload that left one behind would
+    # leak one per restart.
+    from app.artifacts.raster import shutdown as close_renderer
     from app.db.session import engine
 
+    await close_renderer()
     await engine.dispose()
 
 

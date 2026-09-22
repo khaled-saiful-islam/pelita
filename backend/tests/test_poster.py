@@ -361,8 +361,7 @@ def test_composition_forbids_everything_the_sandbox_would_block() -> None:
     """The prompt and the sandbox have to agree. A poster told it may use a
     script renders into a frame that refuses to run one, and the failure is
     silent."""
-    for banned in ("<script>", "<img>", "background-image url()"):
-        assert banned in COMPOSE_SYSTEM
+    assert "<script>" in COMPOSE_SYSTEM
     assert "Never invent a QR code" in COMPOSE_SYSTEM
 
 
@@ -383,7 +382,7 @@ def test_the_prompts_have_not_drifted() -> None:
     """One hash over all three, so a change to the product is a change to this
     line. If you meant it, update the digest in the same commit as the prompt."""
     combined = "\n".join([DIRECTION_SYSTEM, COMPOSE_SYSTEM, REFINE_SYSTEM]).encode()
-    assert hashlib.sha256(combined).hexdigest()[:16] == "7a1dc01932f32d19"
+    assert hashlib.sha256(combined).hexdigest()[:16] == "7e5614102e302dfa"
 
 
 # --- asking for a change ------------------------------------------------
@@ -452,3 +451,12 @@ async def test_a_long_call_says_how_much_it_has_written() -> None:
     assert len(composing) > 1
     assert composing[0].detail == ""
     assert "KB in" in composing[-1].detail
+
+
+async def test_a_poster_may_use_a_photograph_it_was_given() -> None:
+    """Never one it invented. A model cannot produce a photograph and cannot
+    know one exists, so a URL it writes renders as a broken box."""
+    assert "Never write an image URL" in COMPOSE_SYSTEM
+    assert "image_query" in DIRECTION_SYSTEM
+    # And the direction step is told that most posters are better without one.
+    assert "Empty is the right" in DIRECTION_SYSTEM

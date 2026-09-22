@@ -146,17 +146,7 @@ export function ArtifactPanel({
               <Button variant="ghost" size="sm" onClick={() => setSharing(true)} title="Share a link">
                 <Link2 className="size-4" aria-hidden />
               </Button>
-              {/* A plain link: the browser already knows how to save a file the
-                  server marked as an attachment. */}
-              <a
-                href={`/api/artifacts/${artifact.id}/download?version=${artifact.version}`}
-                download
-                title="Download"
-              >
-                <Button variant="ghost" size="sm">
-                  <Download className="size-4" aria-hidden />
-                </Button>
-              </a>
+              <DownloadMenu artifact={artifact} />
               <a
                 href={`/api/artifacts/${artifact.id}/raw?version=${artifact.version}`}
                 target="_blank"
@@ -262,6 +252,64 @@ export function ArtifactPanel({
         />
       )}
     </div>
+  )
+}
+
+/**
+ * Saving the poster.
+ *
+ * A picture by default, because that is what a poster is for — it goes into a
+ * message or a feed, and neither takes an HTML file. The document is the
+ * second option, for whoever wants to edit it again later.
+ *
+ * Plain links, not fetch-and-blob: the browser already knows how to save a
+ * file the server marked as an attachment.
+ */
+function DownloadMenu({
+  artifact,
+}: {
+  artifact: { id: string; version: number }
+}) {
+  const [open, setOpen] = useState(false)
+  const base = `/api/artifacts/${artifact.id}/download?version=${artifact.version}`
+
+  return (
+    <span className="relative">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((was) => !was)}
+        aria-expanded={open}
+        title="Download"
+      >
+        <Download className="size-4" aria-hidden />
+      </Button>
+      {open && (
+        <>
+          <span className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
+          <span className="absolute right-0 top-full z-20 mt-1 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-background py-1 shadow-lg">
+            <a
+              href={base}
+              download
+              onClick={() => setOpen(false)}
+              className="px-3 py-2 text-left text-xs hover:bg-muted"
+            >
+              <span className="block font-medium">Picture (PNG)</span>
+              <span className="block text-muted-foreground">To post or send</span>
+            </a>
+            <a
+              href={`${base}&format=html`}
+              download
+              onClick={() => setOpen(false)}
+              className="px-3 py-2 text-left text-xs hover:bg-muted"
+            >
+              <span className="block font-medium">Document (HTML)</span>
+              <span className="block text-muted-foreground">To edit or print later</span>
+            </a>
+          </span>
+        </>
+      )}
+    </span>
   )
 }
 

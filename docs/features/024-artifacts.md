@@ -55,6 +55,33 @@ two faces from anything Google Fonts serves, and its own canvas — a printed
 flyer, a square social post and a wide banner are the same kind and different
 shapes. Only a floor, a ceiling and a default are imposed on the size.
 
+### A photograph, when the design wants one
+
+A model cannot produce a photograph, and one asked for a picture writes a URL
+that looks plausible and resolves to nothing. So the rule is not "no images" —
+it is that a poster may only use a picture it was **given**.
+
+The direction step may ask for one, with search terms rather than a URL. It is
+searched for, downloaded, downscaled to what the canvas can use, and embedded
+as a data URI. The composing model is told a CSS variable holds it and never
+sees the bytes: a base64 photograph in a prompt costs more than the whole
+poster, so it goes in after the model has finished, and comes back out again
+before any later pass sends the document back.
+
+Embedding rather than linking keeps three promises the rest of the feature
+already makes — the document stays one file that prints and downloads, a shared
+poster does not report its readers to a stranger's host, and the picture cannot
+vanish from under it later.
+
+The direction step is told that most good posters are type, colour and drawn
+shape, and that a stock photograph behind a headline is the most generic thing
+a poster can be. If the person asked for an image, they get one: their words
+win. Asking for one in the chat works too — a change that mentions a picture
+triggers the same search.
+
+Without a search key there is nothing to find, and posters are designed without
+photographs.
+
 ### Nothing may be cut off
 
 The one defect a person sees instantly. Three defences, because no one of them
@@ -95,6 +122,7 @@ disagreeing.
 | change | how | cost |
 |---|---|---|
 | a word is wrong | the pencil: edit it on the poster | no model call, instant, no new version |
+| add or change a picture | say so in the chat box | a search plus one call |
 | the design | say so in the chat box | ~40s, a new version |
 | a different idea | ask for a new one | a full build |
 
@@ -118,6 +146,18 @@ document order and an edit names a number. Every tag, attribute and byte of CSS
 is copied through untouched, which is what makes it safe with nothing checking
 the result.
 
+### Saving it
+
+The download is a **picture** by default. A poster goes into a message, a feed
+or a noticeboard, and none of those take an HTML file. That needs a real
+browser, because nothing else renders a document the way the one the reader is
+looking at does — so the backend image carries headless Chromium, opens the
+poster, waits for its fonts and screenshots the canvas at twice its size.
+
+The document is the second option, and is what to keep to edit or print it
+later. `ARTIFACT_EXPORT_PNG=false` turns the picture off for a deployment that
+only wants the file, and the Chromium line can then come out of the Dockerfile.
+
 ### Sharing
 
 A frozen copy of one version, on a 256-bit token, with its kind's sandbox
@@ -135,7 +175,8 @@ ARTIFACT_API_KEY=                # defaults to LLM_API_KEY
 ARTIFACT_MAX_TOKENS=16384
 ARTIFACT_TIMEOUT_SECONDS=300
 ARTIFACT_REFINE_PASS=true        # roughly doubles the wall clock
-ARTIFACT_MAX_BYTES=262144
+ARTIFACT_MAX_BYTES=1500000        # generous: a photograph travels inside the file
+ARTIFACT_EXPORT_PNG=true         # needs Chromium in the image
 ARTIFACT_MAX_PER_CONVERSATION=10
 ```
 
@@ -159,8 +200,11 @@ documented failure of every implementation that has tried it.
 
 ## Known limits
 
-- **The model cannot make images.** Posters are typography, CSS gradients and
-  inline SVG. A real constraint on what a poster can be, not a phase.
+- **The model cannot make a picture, only find one.** There is no image model
+  here, so a photograph is searched for. When nothing suitable is found the
+  poster is designed without one.
+- **A found photograph is somebody else's.** The source page is recorded on the
+  artifact, but nothing checks its licence.
 - **One artifact per turn.** Two would race for the same panel.
 - **A build is 40–90 seconds**, roughly half of it refinement.
 - **A content edit costs a composing call.** Only words are free.

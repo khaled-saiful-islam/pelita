@@ -139,9 +139,15 @@ class Settings(BaseSettings):
     # The refinement pass roughly doubles the wall clock. Worth it on a fast
     # provider, the first thing to switch off on a slow one.
     artifact_refine_pass: bool = True
-    # A document larger than this is a runaway, not a richer poster.
-    artifact_max_bytes: int = 262_144
+    # A document larger than this is a runaway, not a richer poster. Generous
+    # because a poster may carry a photograph inside it: the picture is
+    # embedded rather than linked, so the document stays one file that prints,
+    # downloads and shares without reaching for anything.
+    artifact_max_bytes: int = 1_500_000
     artifact_max_per_conversation: int = 10
+    # Exporting a poster as a picture needs a real browser in the image. Off,
+    # and the download gives the document instead of a picture.
+    artifact_export_png: bool = True
 
     @property
     def artifacts_available(self) -> bool:

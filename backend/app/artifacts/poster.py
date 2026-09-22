@@ -36,11 +36,21 @@ from app.artifacts.base import (
     Step,
     Swatch,
 )
+from app.artifacts.imagery import (
+    WANTS_A_PICTURE,
+    Photo,
+    attach_photo,
+    detach_photo,
+    find_photo,
+    photo_brief,
+    reattach,
+)
 from app.artifacts.model import ArtifactModel, Written
 from app.artifacts.poster_prompts import (
     COMPOSE_SYSTEM,
     DEFAULT_CANVAS,
     DIRECTION_SYSTEM,
+    IMAGE_QUERY_SYSTEM,
     MAX_CANVAS,
     MIN_CANVAS,
     REFINE_SYSTEM,
@@ -48,6 +58,7 @@ from app.artifacts.poster_prompts import (
 )
 from app.artifacts.validate import Finding, check, repair_request
 from app.providers.base import Usage, UsageSource
+from app.tools.serpapi import SearchProvider
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +100,19 @@ class PosterKind:
     sandbox = SandboxPolicy(scripts=False, fonts=True, images=False)
 
     def __init__(
-        self, model: ArtifactModel, *, refine: bool = True, max_bytes: int = 262_144
+        self,
+        model: ArtifactModel,
+        *,
+        refine: bool = True,
+        max_bytes: int = 1_500_000,
+        search: SearchProvider | None = None,
     ) -> None:
         self._model = model
         self._refine = refine
         self._max_bytes = max_bytes
+        # Without one, a poster is type, colour and drawn shape. With one, it
+        # can also use a photograph somebody else took.
+        self._search = search
 
     async def build(self, brief: Brief) -> AsyncIterator[BuildUpdate]:
         started = perf_counter()
@@ -107,16 +126,35 @@ class PosterKind:
         spec = await self._direct(context)
         yield Step(label="Chose a direction", detail=_direction_summary(spec))
 
+        photo = None
+        if spec.image_query and self._search is not None:
+            yield Step(label="Finding a photograph", detail=spec.image_query)
+            photo = await find_photo(self._search, spec.image_query)
+            if photo is None:
+                # Not an error. A poster without the photograph it hoped for is
+                # still a poster, and the model is simply not told about one.
+                yield Step(label="No photograph fitted", detail="designing without one")
+            else:
+                spec = replace(spec, image_source=photo.source)
+                yield Step(label="Found a photograph", detail=f"{photo.width}x{photo.height}")
+
         written = Written()
         async for update in self._write(
-            self._compose_system(spec), context, written, label="Composing"
+            self._compose_system(spec, photo=photo), context, written, label="Composing"
         ):
             yield update
 
         html, usage = written.text, written.usage
 
+        # `html` stays the model's own document for the whole pipeline. The
+        # photograph is attached only to check the real thing and to finish,
+        # because a base64 image costs more tokens than the entire poster and
+        # a repair pass that carried one would pay for it twice.
+        def finished(document: str) -> str:
+            return attach_photo(document, photo) if photo is not None else document
+
         yield Step(label="Checking it fits")
-        findings = self._check(html, spec)
+        findings = self._check(finished(html), spec)
         if findings:
             yield Step(label="Fixing a problem", detail=str(findings[0]))
             repaired = Written()
@@ -127,10 +165,12 @@ class PosterKind:
                 pass
             # Only if it is actually better. A repair that broke something else
             # is not an improvement, and the original at least renders.
-            if repaired.text and len(self._check(repaired.text, spec)) < len(findings):
+            if repaired.text and len(self._check(finished(repaired.text), spec)) < len(
+                findings
+            ):
                 html = repaired.text
                 usage = _summed(usage, repaired.usage)
-                findings = self._check(html, spec)
+                findings = self._check(finished(html), spec)
 
         if self._refine:
             yield Step(label="Refining")
@@ -149,13 +189,15 @@ class PosterKind:
             # Kept only if it is whole and did not break anything the
             # composed document had right. A refinement is a nicety; a
             # document that renders is not.
-            if len(polished.text) > len(html) * 0.6 and not self._check(polished.text, spec):
+            if len(polished.text) > len(html) * 0.6 and not self._check(
+                finished(polished.text), spec
+            ):
                 html = polished.text
                 usage = _summed(usage, polished.usage)
 
         yield Finished(
             built=Built(
-                html=html,
+                html=finished(html),
                 spec=spec,
                 model=self._model.name,
                 prompt_tokens=usage.prompt_tokens,
@@ -215,21 +257,47 @@ class PosterKind:
         already looking at the result and can ask again.
         """
         started = perf_counter()
+
+        # Out before the model sees it, back in afterwards. A base64
+        # photograph in the document costs more than every other part of this
+        # request put together.
+        plain, existing = detach_photo(html)
+
+        photo: Photo | None = None
+        if not existing and self._search is not None and WANTS_A_PICTURE.search(instruction):
+            query = await self._image_query(instruction, spec)
+            if query:
+                yield Step(label="Finding a photograph", detail=query)
+                photo = await find_photo(self._search, query)
+                if photo is None:
+                    yield Step(label="No photograph fitted", detail="changing without one")
+
         written = Written()
         request = (
             f'<user_context type="change">{instruction}</user_context>\n\n'
-            f"THE POSTER AS IT STANDS:\n\n{html}"
+            f"THE POSTER AS IT STANDS:\n\n{plain}"
         )
+        system = f"{REVISE_SYSTEM}\n{self._direction_block(spec)}"
+        if photo is not None:
+            system = f"{system}\n\nTHE PHOTOGRAPH\n{photo_brief(photo)}"
+        elif existing:
+            system = (
+                f"{system}\n\nTHE PHOTOGRAPH\nThis poster already uses a photograph, held "
+                "in the CSS variable `--photo`. Keep using `var(--photo)` unless the change "
+                "asks for it to go. Never write an image URL yourself."
+            )
+
         async for update in self._write(
-            f"{REVISE_SYSTEM}\n{self._direction_block(spec)}",
-            request,
-            written,
-            label="Redrawing",
-            temperature=0.2,
+            system, request, written, label="Redrawing", temperature=0.2
         ):
             yield update
 
         revised, usage = written.text, written.usage
+        if photo is not None:
+            revised = attach_photo(revised, photo)
+        elif existing:
+            revised = reattach(revised, existing)
+
         yield Step(label="Checking it fits")
         findings = self._check(revised, spec)
         if findings:
@@ -252,13 +320,31 @@ class PosterKind:
             )
         )
 
+    async def _image_query(self, instruction: str, spec: DesignSpec) -> str:
+        """What to search for, when a change sounds like it wants a picture.
+
+        A second, small call rather than a keyword lifted out of the sentence:
+        "add something behind the title" wants a photograph and names nothing
+        to search for, and the poster's own subject is what makes the query.
+        """
+        asked = (
+            f'<user_context type="change">{instruction}</user_context>\n'
+            f'<user_context type="poster">{spec.movement}. {spec.layout} '
+            f"{spec.motif} {spec.reference}</user_context>"
+        )
+        answered = await self._model.decide(IMAGE_QUERY_SYSTEM, asked, max_tokens=200)
+        return str(answered.get("image_query") or "").strip()[:200]
+
     async def _direct(self, context: str) -> DesignSpec:
         raw = await self._model.decide(DIRECTION_SYSTEM, context)
         spec = DesignSpec.from_dict(raw)
         return _with_fallbacks(spec)
 
-    def _compose_system(self, spec: DesignSpec) -> str:
-        return f"{COMPOSE_SYSTEM}\n{self._direction_block(spec)}"
+    def _compose_system(self, spec: DesignSpec, *, photo: Photo | None = None) -> str:
+        parts = [COMPOSE_SYSTEM, self._direction_block(spec)]
+        if photo is not None:
+            parts.append(f"\nTHE PHOTOGRAPH\n{photo_brief(photo)}")
+        return "\n".join(parts)
 
     def _direction_block(self, spec: DesignSpec) -> str:
         """The direction, written out for whichever prompt is using it."""

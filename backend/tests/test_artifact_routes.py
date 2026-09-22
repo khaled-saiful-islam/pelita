@@ -260,10 +260,10 @@ async def test_somebody_else_cannot_share_your_artifact(api, artifact, stranger)
 # --- downloading --------------------------------------------------------
 
 
-async def test_downloading_gives_the_document_as_a_named_file(api, artifact) -> None:
+async def test_downloading_the_document_gives_a_named_file(api, artifact) -> None:
     async with api as client:
         await sign_in(client)
-        response = await client.get(f"/api/artifacts/{artifact.id}/download")
+        response = await client.get(f"/api/artifacts/{artifact.id}/download?format=html")
 
     assert response.status_code == 200
     assert response.text == DOCUMENT
@@ -286,7 +286,7 @@ async def test_a_title_that_would_break_a_filesystem_is_cleaned(
     )
     async with api as client:
         await sign_in(client)
-        response = await client.get(f"/api/artifacts/{made.id}/download")
+        response = await client.get(f"/api/artifacts/{made.id}/download?format=html")
 
     disposition = response.headers["content-disposition"]
     assert "/" not in disposition.split("filename=")[1]
@@ -390,3 +390,48 @@ async def test_somebody_else_cannot_edit_your_words(api, wordy, stranger) -> Non
         )
 
     assert response.status_code == 404
+
+
+# --- downloading a picture ----------------------------------------------
+
+
+async def test_a_download_is_a_picture_by_default(api, artifact, monkeypatch) -> None:
+    """A poster goes into a message, a feed or a noticeboard, and none of those
+    take an HTML file."""
+    import app.api.routes.artifacts as routes
+
+    async def fake_png(html: str, *, width: int, height: int, scale: int = 2) -> bytes:
+        assert "canvas" in html
+        assert (width, height) == (794, 1123)
+        return b"\x89PNG\r\n\x1a\nfake"
+
+    monkeypatch.setattr(routes, "to_png", fake_png)
+
+    async with api as client:
+        await sign_in(client)
+        response = await client.get(f"/api/artifacts/{artifact.id}/download")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="Friday-night-jazz.png"'
+    )
+    assert response.content.startswith(b"\x89PNG")
+
+
+async def test_no_renderer_is_a_message_not_a_crash(api, artifact, monkeypatch) -> None:
+    import app.api.routes.artifacts as routes
+    from app.artifacts.raster import RasterUnavailable
+
+    async def no_browser(html: str, *, width: int, height: int, scale: int = 2) -> bytes:
+        raise RasterUnavailable("This deployment cannot export pictures.")
+
+    monkeypatch.setattr(routes, "to_png", no_browser)
+
+    async with api as client:
+        await sign_in(client)
+        response = await client.get(f"/api/artifacts/{artifact.id}/download")
+
+    # A message, with the document still one query parameter away.
+    assert response.status_code == 422
+    assert "cannot export" in response.json()["error"]["message"]

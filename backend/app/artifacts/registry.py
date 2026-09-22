@@ -13,6 +13,7 @@ from app.artifacts.model import ArtifactModel
 from app.artifacts.poster import PosterKind
 from app.core.config import Settings, get_settings
 from app.providers.openai_compatible import OpenAICompatibleProvider
+from app.tools.serpapi import SerpApiSearch
 
 
 def build_kinds(settings: Settings | None = None) -> dict[str, ArtifactKind]:
@@ -33,9 +34,20 @@ def build_kinds(settings: Settings | None = None) -> dict[str, ArtifactKind]:
         ),
         max_tokens=settings.artifact_max_tokens,
     )
-    kinds: list[ArtifactKind] = [PosterKind(
+    # A poster may use a photograph somebody else took, when the design wants
+    # one. Without a search key there is none to find, and it designs with
+    # type, colour and drawn shape instead.
+    search = (
+        SerpApiSearch(api_key=settings.serpapi_key, base_url=settings.serpapi_base_url)
+        if settings.search_enabled
+        else None
+    )
+    kinds: list[ArtifactKind] = [
+        PosterKind(
             model,
             refine=settings.artifact_refine_pass,
             max_bytes=settings.artifact_max_bytes,
-        )]
+            search=search,
+        )
+    ]
     return {kind.name: kind for kind in kinds}

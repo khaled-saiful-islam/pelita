@@ -60,10 +60,19 @@ def test_an_inline_event_handler_is_caught() -> None:
     )
 
 
-def test_an_image_tag_is_caught() -> None:
-    assert "The document contains an <img>" in failures(
+def test_a_linked_picture_is_caught() -> None:
+    """A URL the model invented renders as a broken box on somebody's poster."""
+    assert "The document links to a picture that was not found for it" in failures(
         GOOD.replace("<h1>Hello</h1>", '<img src="https://example.test/a.jpg">')
     )
+
+
+def test_an_embedded_picture_is_allowed() -> None:
+    """One that travels inside the document is one that was found for it, and
+    it cannot break, disappear or report who looked at the poster."""
+    assert failures(
+        GOOD.replace("<h1>Hello</h1>", '<img src="data:image/jpeg;base64,/9j/4AAQ">')
+    ) == []
 
 
 def test_a_stylesheet_loading_a_picture_is_caught() -> None:

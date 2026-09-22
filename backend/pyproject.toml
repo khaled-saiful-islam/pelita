@@ -23,6 +23,9 @@ dependencies = [
     "python-docx>=1.1",
     "python-multipart>=0.0.20",
     "pillow>=11.0",
+    # A real browser, for exporting a poster as a picture. Nothing else
+    # renders a document the way the one the reader is looking at does.
+    "playwright>=1.49",
 ]
 
 [project.optional-dependencies]

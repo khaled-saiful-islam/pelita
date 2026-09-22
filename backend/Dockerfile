@@ -17,6 +17,11 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir -e . \
  && pip install --no-cache-dir pytest pytest-asyncio pytest-cov ruff
 
+# Chromium, for exporting a poster as a picture. It is the largest thing in
+# this image by some way; set ARTIFACT_EXPORT_PNG=false and skip this line if a
+# deployment only ever needs the HTML.
+RUN playwright install --with-deps chromium
+
 # The news MCP server, pinned by commit. It imports mcp.server.fastmcp, which
 # only exists in mcp<2, while the backend client runs mcp 2.x — verified to
 # interoperate over stdio. Its own virtualenv keeps the two versions apart

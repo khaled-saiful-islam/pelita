@@ -105,6 +105,20 @@ LAYOUT
 - One sentence describing the structure: where the eye lands first, what
   carries the hierarchy, where the weight sits, what the negative space does.
 
+A PHOTOGRAPH, IF THE DESIGN WANTS ONE
+- You may ask for one. It will be found for you and handed to the poster; you
+  never write a URL and you cannot invent one.
+- Ask only when a photograph does work no arrangement of type and colour can:
+  a place nobody knows, a face, food, a texture that has to be real. Most good
+  posters are type, colour and drawn shape, and a stock photograph behind a
+  headline is the most generic thing a poster can be.
+- If the person asked for an image, they get one. Their words win.
+- `image_query` is what to search for: concrete, visual and specific, the words
+  a picture library would have tagged it with. "night market food stalls,
+  lanterns, warm light" - not "durian festival poster background".
+- Leave it empty when the design is better without one. Empty is the right
+  answer more often than not.
+
 {_BLOCKLIST}
 
 Reply with JSON and nothing else. No prose, no code fence. Exactly these keys:
@@ -117,6 +131,7 @@ Reply with JSON and nothing else. No prose, no code fence. Exactly these keys:
   "width": 794,
   "height": 1123,
   "shape": "one clause on why that size",
+  "image_query": "what to search for, or empty when type and colour do it better",
   "layout": "one sentence",
   "motif": "the recurring graphic idea, in a few words",
   "reference": "the subtle reference, in a few words"}}
@@ -132,10 +147,12 @@ OUTPUT
   Google Fonts link for the two chosen families.
 - No <script>, ever. No inline event handlers. The document is art; it does not
   execute.
-- No <img>, no background-image url(), no external image of any kind. You
-  cannot produce a photograph, and inventing a URL produces a broken box.
-  Everything visual is CSS — gradients, shapes, borders, transforms — or inline
-  <svg> you draw yourself.
+- Never write an image URL. You cannot produce a photograph and you cannot
+  know that one exists, so a URL you invent renders as a broken box on
+  somebody's poster. When a photograph has been found for this poster you are
+  told so below and given the one variable that holds it; that is the only
+  image there is. Otherwise everything visual is CSS — gradients, shapes,
+  borders, transforms — or inline <svg> you draw yourself.
 - Never invent a QR code, a URL, a domain, a phone number or a social handle.
   If you were not given one, it does not go on the poster.
 - Never rebuild a real flag, coat of arms, emblem or company logo from CSS or
@@ -270,4 +287,20 @@ clipped or outside the edges, no window units.
 
 Reply with the complete revised document. HTML only, starting with
 <!DOCTYPE html>. No commentary, no fence, no explanation of what you changed.
+"""
+
+
+IMAGE_QUERY_SYSTEM = """
+Somebody has asked for a change to a poster, and the change may want a
+photograph. Decide whether it does, and if so say what to search for.
+
+Search terms are concrete, visual and specific - the words a picture library
+would have tagged the photograph with, not a description of the poster.
+"night market food stalls, lanterns, warm light" rather than "durian festival
+poster background".
+
+If the change does not want a photograph, or wants one removed, return an empty
+query. Reply with JSON and nothing else:
+
+{"image_query": "what to search for, or empty"}
 """

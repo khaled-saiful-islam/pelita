@@ -143,6 +143,11 @@ class DesignSpec:
     width: int = 0
     height: int = 0
     shape: str = ""
+    # What to look for, when the design genuinely wants a photograph. Empty
+    # means it does not, which is the right answer more often than not.
+    image_query: str = ""
+    # Where the picture that was found came from, once there is one.
+    image_source: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -157,6 +162,8 @@ class DesignSpec:
             "width": self.width,
             "height": self.height,
             "shape": self.shape,
+            "image_query": self.image_query,
+            "image_source": self.image_source,
         }
 
     @classmethod
@@ -180,6 +187,8 @@ class DesignSpec:
             width=_as_int(raw.get("width")),
             height=_as_int(raw.get("height")),
             shape=str(raw.get("shape", "")),
+            image_query=str(raw.get("image_query", "")),
+            image_source=str(raw.get("image_source", "")),
         )
 
 

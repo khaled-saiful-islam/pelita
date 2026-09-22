@@ -77,7 +77,11 @@ class _Reader(HTMLParser):
         if tag == "style":
             self._in_style = True
         if tag == "img":
-            self.images += 1
+            # An embedded picture is one that was found for this poster and
+            # travels inside it. A linked one is a URL the model invented.
+            source = next((v or "" for k, v in attrs if k == "src"), "")
+            if not source.strip().startswith("data:"):
+                self.images += 1
         for name, value in attrs:
             if name.startswith("on"):
                 self.event_attributes.append(name)
@@ -145,8 +149,9 @@ def _images(reader: _Reader, style: str) -> list[Finding]:
     if reader.images:
         findings.append(
             Finding(
-                "The document contains an <img>",
-                "there is no picture to point it at, so it renders as a broken box",
+                "The document links to a picture that was not found for it",
+                "an invented URL renders as a broken box; only an embedded "
+                "image is one that actually exists",
             )
         )
     for url in _CSS_URL.findall(style):
