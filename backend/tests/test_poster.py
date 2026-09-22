@@ -88,8 +88,12 @@ class FakeArtifactProvider:
         documents: list[str] | None = None,
         fail_stream: str | None = None,
         fail_decide: str | None = None,
+        edits: object = None,
     ) -> None:
         self._direction = direction
+        # What the edit call answers. None means "cannot be done as edits",
+        # which sends the revision down the rewrite path.
+        self._edits = edits if edits is not None else {"edits": []}
         self._documents = documents
         self._size = (1080, 1350)
         self._fail_stream = fail_stream
@@ -103,11 +107,12 @@ class FakeArtifactProvider:
         self.prompts.append(req.messages[0].content)
         if self._fail_decide:
             raise ProviderError(self._fail_decide)
-        text = (
-            self._direction
-            if isinstance(self._direction, str)
-            else json.dumps(self._direction)
+        answer = (
+            self._edits
+            if "You are changing one thing" in req.messages[0].content
+            else self._direction
         )
+        text = answer if isinstance(answer, str) else json.dumps(answer)
         return Completion(
             text=text,
             usage=Usage(prompt_tokens=10, completion_tokens=20, source=UsageSource.PROVIDER),
@@ -404,16 +409,33 @@ async def revise(kind: PosterKind, html: str = POSTER, instruction: str = "make 
     ]
 
 
+async def test_a_change_edits_the_poster_rather_than_replacing_it() -> None:
+    """The whole point. Asked for a different background and handed the poster,
+    a model returns a different poster, and somebody who liked the layout has
+    lost it."""
+    provider = FakeArtifactProvider(
+        edits={"edits": [{"find": "--ground:#12151C", "replace": "--ground:#FFF6E5"}]}
+    )
+    updates = await revise(poster_for(provider))
+
+    built = updates[-1].built
+    assert "--ground:#FFF6E5" in built.html
+    # Everything else is byte for byte what it was.
+    assert built.html == POSTER.replace("--ground:#12151C", "--ground:#FFF6E5")
+    # And it never streamed a replacement document.
+    assert provider.requests[0].stream is False
+
+
 async def test_a_revision_keeps_the_direction_it_already_has() -> None:
     """Re-deciding the direction is how "make the date bigger" comes back as a
     different poster."""
     provider = FakeArtifactProvider()
     updates = await revise(poster_for(provider))
 
-    # One call, not three: no direction step and no refinement pass.
-    assert len(provider.prompts) == 1
-    assert "Midnight Brass" in provider.prompts[0]
+    # The edit attempt, then the rewrite it fell back to. Never the direction
+    # step, and never the refinement pass.
     assert DIRECTION_SYSTEM not in provider.prompts
+    assert any("Midnight Brass" in prompt for prompt in provider.prompts)
     assert updates[-1].built.spec.movement == "Midnight Brass"
 
 
@@ -421,7 +443,7 @@ async def test_the_change_and_the_poster_both_reach_the_model() -> None:
     provider = FakeArtifactProvider()
     await revise(poster_for(provider), instruction="make the price bigger")
 
-    sent = provider.requests[0].messages[1].content
+    sent = provider.requests[-1].messages[1].content
     assert "make the price bigger" in sent
     assert "THE POSTER AS IT STANDS" in sent
     # Wrapped, because it came from a person through a text box.
@@ -440,7 +462,7 @@ async def test_a_revision_that_comes_back_broken_is_refused() -> None:
 
 async def test_a_revision_reports_what_it_is_doing() -> None:
     updates = await revise(poster_for(FakeArtifactProvider()))
-    assert phases(updates) == ["Redrawing", "Checking it fits"]
+    assert phases(updates) == ["Making the change", "Redrawing", "Checking it fits"]
 
 
 async def test_a_long_call_says_how_much_it_has_written() -> None:

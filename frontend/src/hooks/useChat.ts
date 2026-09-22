@@ -74,6 +74,8 @@ export interface UseChat {
   /** The artifact the panel is showing, or null for none. */
   openArtifact: string | null
   setOpenArtifact: (artifactId: string | null) => void
+  /** Bumped when a turn finishes changing an artifact. */
+  artifactRevision: number
 }
 
 export function useChat(onConversationStarted?: (id: string, title: string) => void): UseChat {
@@ -87,6 +89,9 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   const [totals, setTotals] = useState<Totals | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [openArtifact, setOpenArtifact] = useState<string | null>(null)
+  // Counts finished artifact builds. The panel watches it, because an edit
+  // produces a new version under the same id and nothing else would tell it.
+  const [artifactRevision, setArtifactRevision] = useState(0)
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
@@ -324,9 +329,11 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
                   ),
                 )
               }
-              // Opened as soon as it exists. The panel measures it before it
-              // shows anything, so this is not a promise that it is good.
+              // Opened as soon as it exists, and bumped either way: an edit
+              // keeps the same id, so this is what tells the panel to look
+              // again.
               setOpenArtifact(artifact.id)
+              setArtifactRevision((n) => n + 1)
             },
             onArtifactFailed: (failure) => {
               patchBuild((build) => ({ ...build, failed: failure.message }))
@@ -465,6 +472,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     reset,
     openArtifact,
     setOpenArtifact,
+    artifactRevision,
   }
 }
 

@@ -234,6 +234,7 @@ export default function Chat() {
           >
             <ArtifactPanel
               artifactId={chat.openArtifact}
+              revision={chat.artifactRevision}
               build={building}
               onClose={() => chat.setOpenArtifact(null)}
             />

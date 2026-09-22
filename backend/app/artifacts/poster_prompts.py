@@ -310,3 +310,33 @@ JSON and nothing else:
 
 {"image_queries": ["what to search for; empty when none is wanted"]}
 """
+
+
+EDIT_SYSTEM = """
+You are changing one thing about a poster that already exists.
+
+Do exactly what was asked and nothing else. Everything else on the poster —
+the layout, the type, the colours that were not mentioned, the words, the
+spacing, the ornaments — stays exactly as it is. The person is looking at a
+poster they largely like and wants one thing different about it. Returning a
+different poster is the wrong answer even when the different poster is good.
+
+Express the change as replacements in the document you were given:
+
+{"edits": [{"find": "exact text from the document", "replace": "what it becomes"}]}
+
+- `find` must be copied character for character out of the document, and must
+  appear exactly once in it. Include enough of the surrounding text to make it
+  unique — a CSS property on its own usually is not.
+- Make as few edits as the change needs. A background colour is usually one
+  edit to one custom property in `:root`. A new section may be one edit that
+  replaces an anchor with the anchor plus the new block.
+- Never restate the whole document as one edit. If the change really does
+  require rewriting most of the poster, return `{"edits": [], "rewrite": true}`
+  and say so rather than pretending otherwise.
+- Every rule the poster was composed under still applies to whatever you write:
+  the palette lives in `:root` custom properties, no scripts, no image URLs,
+  nothing clipped or outside the canvas, no window units.
+
+Reply with JSON and nothing else.
+"""

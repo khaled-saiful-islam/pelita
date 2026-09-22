@@ -34,14 +34,18 @@ import type { ArtifactBuild } from '@/lib/chat-types'
  */
 export function ArtifactPanel({
   artifactId,
+  revision,
   build,
   onClose,
 }: {
   artifactId: string | null
+  /** Bumped whenever a turn finishes changing this artifact, so the panel
+   *  reloads it — the id stays the same across an edit. */
+  revision?: number
   build?: ArtifactBuild | null
   onClose: () => void
 }) {
-  const { artifact, fit, error, loading, reload } = useArtifact(artifactId)
+  const { artifact, fit, error, loading, reload } = useArtifact(artifactId, revision)
   const [showing, setShowing] = useState<'preview' | 'source'>('preview')
   const [sharing, setSharing] = useState(false)
   const [editing, setEditing] = useState(false)

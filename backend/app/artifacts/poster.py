@@ -37,6 +37,7 @@ from app.artifacts.base import (
     Swatch,
     read_queries,
 )
+from app.artifacts.edits import apply_edits, read_edits
 from app.artifacts.imagery import (
     WANTS_A_PICTURE,
     Photo,
@@ -51,6 +52,7 @@ from app.artifacts.poster_prompts import (
     COMPOSE_SYSTEM,
     DEFAULT_CANVAS,
     DIRECTION_SYSTEM,
+    EDIT_SYSTEM,
     IMAGE_QUERY_SYSTEM,
     MAX_CANVAS,
     MIN_CANVAS,
@@ -303,12 +305,19 @@ class PosterKind:
         if available:
             system = f"{system}\n\nTHE PICTURES\n{photo_brief(available)}"
 
-        async for update in self._write(
-            system, request, written, label="Redrawing", temperature=0.2
-        ):
-            yield update
+        # Try to change part of it before offering to write a new one. A model
+        # handed the whole poster returns a whole poster, and the person who
+        # wanted a different background loses the layout they liked.
+        yield Step(label="Making the change", detail=instruction[:70])
+        revised, usage = await self._edit_in_place(plain, instruction, system, available)
 
-        revised, usage = written.text, written.usage
+        if revised is None:
+            yield Step(label="Redrawing", detail="the change needs more than a patch")
+            async for update in self._write(
+                system, request, written, label="Redrawing", temperature=0.2
+            ):
+                yield update
+            revised, usage = written.text, written.usage
         if available:
             corrected, swapped = use_the_real_photograph(revised)
             if swapped:
@@ -336,6 +345,57 @@ class PosterKind:
                 build_ms=int((perf_counter() - started) * 1000),
             )
         )
+
+    async def _edit_in_place(
+        self,
+        document: str,
+        instruction: str,
+        system: str,
+        photos: Sequence[Photo],
+    ) -> tuple[str | None, Usage]:
+        """Change the parts that were asked about, or say it cannot be done.
+
+        Two attempts. An unmatched `find` is the failure mode every
+        implementation of this has, and it is silent in most of them; here the
+        model is told exactly which ones missed and gets one more go. Returning
+        None means "this needs a rewrite", which is a real answer for a change
+        that restructures the poster.
+        """
+        empty = Usage(prompt_tokens=0, completion_tokens=0, source=UsageSource.ESTIMATED)
+        asked = (
+            f'<user_context type="change">{instruction}</user_context>\n\n'
+            f"THE DOCUMENT:\n\n{document}"
+        )
+
+        for attempt in range(2):
+            answered = await self._model.decide(
+                f"{EDIT_SYSTEM}\n{system}", asked, max_tokens=6000
+            )
+            if answered.get("rewrite"):
+                return None, empty
+
+            edits = read_edits(answered)
+            if not edits:
+                return None, empty
+
+            edited, problems = apply_edits(document, edits)
+            if not problems:
+                logger.info("changed %d part(s) of the poster in place", len(edits))
+                return edited, empty
+            if attempt:
+                logger.info("edits did not apply, rewriting instead: %s", problems[0])
+                return None, empty
+
+            # Named, not swallowed. A find that matches nothing is the one
+            # failure this approach has, and silence is how it becomes a
+            # change that appeared to work and did not.
+            asked = (
+                f"{asked}\n\nYour previous edits could not be applied:\n"
+                + "\n".join(f"- {problem}" for problem in problems)
+                + "\n\nCopy the text to find character for character out of the "
+                "document above, and make sure each one appears exactly once."
+            )
+        return None, empty
 
     async def _image_queries(self, instruction: str, spec: DesignSpec) -> tuple[str, ...]:
         """What to search for, when a change sounds like it wants a picture.

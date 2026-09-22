@@ -14,7 +14,7 @@ import type { ArtifactDetail } from '@/lib/chat-types'
  * `fit` is deliberately undefined until the measurement finishes. The panel
  * waits for it rather than showing a poster and then admitting it is broken.
  */
-export function useArtifact(artifactId: string | null) {
+export function useArtifact(artifactId: string | null, revision = 0) {
   const [artifact, setArtifact] = useState<ArtifactDetail | null>(null)
   const [fit, setFit] = useState<FitResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +55,11 @@ export function useArtifact(artifactId: string | null) {
       return
     }
     void load(artifactId)
-  }, [artifactId, load])
+    // `revision` is what makes an edit appear. The id does not change when a
+    // poster is changed, so without it the panel would keep showing the
+    // version it loaded the first time and the version selector would never
+    // learn there was a second one.
+  }, [artifactId, revision, load])
 
   return { artifact, fit, error, loading, reload: load }
 }
