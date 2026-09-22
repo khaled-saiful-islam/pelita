@@ -291,3 +291,100 @@ async def test_a_title_that_would_break_a_filesystem_is_cleaned(
     disposition = response.headers["content-disposition"]
     assert "/" not in disposition.split("filename=")[1]
     assert disposition.endswith('.html"')
+
+
+# --- editing the words --------------------------------------------------
+
+
+TEXT_POSTER = (
+    "<!DOCTYPE html><html><head><style>.canvas{width:794px}</style></head>"
+    '<body><div class="canvas"><h1>Friday night jazz</h1><p>RM35</p></div></body></html>'
+)
+
+
+@pytest.fixture
+async def wordy(session, db_user, conversation):
+    return await SqlArtifactRepository(session).create(
+        conversation_id=conversation.id,
+        user_id=db_user.id,
+        message_id=None,
+        kind="poster",
+        title="Jazz",
+        html=TEXT_POSTER,
+        design_spec={"movement": "Midnight Brass", "width": 794, "height": 1123},
+    )
+
+
+async def test_the_words_can_be_read_back_in_order(api, wordy) -> None:
+    async with api as client:
+        await sign_in(client)
+        words = (await client.get(f"/api/artifacts/{wordy.id}/text")).json()
+
+    assert words == ["Friday night jazz", "RM35"]
+
+
+async def test_changing_a_word_costs_no_model_call(api, wordy) -> None:
+    async with api as client:
+        await sign_in(client)
+        response = await client.post(
+            f"/api/artifacts/{wordy.id}/text",
+            json={"changes": [{"index": 1, "text": "RM40"}]},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "RM40" in body["html"]
+    assert "Friday night jazz" in body["html"]
+    # The stylesheet is untouched, byte for byte.
+    assert ".canvas{width:794px}" in body["html"]
+
+
+async def test_an_edit_is_a_new_version(api, wordy) -> None:
+    """An edit that overwrites what it replaced cannot be undone."""
+    async with api as client:
+        await sign_in(client)
+        body = (
+            await client.post(
+                f"/api/artifacts/{wordy.id}/text",
+                json={"changes": [{"index": 1, "text": "RM40"}]},
+            )
+        ).json()
+        first = (await client.get(f"/api/artifacts/{wordy.id}?version=1")).json()
+
+    assert body["version"] == 2
+    assert "RM35" in first["html"]
+
+
+async def test_an_edit_that_changes_nothing_does_not_make_a_version(api, wordy) -> None:
+    async with api as client:
+        await sign_in(client)
+        body = (
+            await client.post(f"/api/artifacts/{wordy.id}/text", json={"changes": []})
+        ).json()
+
+    assert body["version"] == 1
+
+
+async def test_words_cannot_carry_markup_in(api, wordy) -> None:
+    async with api as client:
+        await sign_in(client)
+        body = (
+            await client.post(
+                f"/api/artifacts/{wordy.id}/text",
+                json={"changes": [{"index": 0, "text": "<script>alert(1)</script>"}]},
+            )
+        ).json()
+
+    assert "<script>" not in body["html"]
+    assert "&lt;script&gt;" in body["html"]
+
+
+async def test_somebody_else_cannot_edit_your_words(api, wordy, stranger) -> None:
+    async with api as client:
+        await sign_in(client, "intruder")
+        response = await client.post(
+            f"/api/artifacts/{wordy.id}/text",
+            json={"changes": [{"index": 0, "text": "mine now"}]},
+        )
+
+    assert response.status_code == 404

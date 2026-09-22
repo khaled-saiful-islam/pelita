@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ArtifactVersionSummary(BaseModel):
@@ -48,3 +48,16 @@ class ArtifactShareResponse(BaseModel):
     version: int
     view_count: int
     created_at: datetime
+
+
+class TextChange(BaseModel):
+    """One run of words, by the number the browser and the server both give it."""
+
+    index: int = Field(ge=0, le=5000)
+    text: str = Field(max_length=2000)
+
+
+class EditTextRequest(BaseModel):
+    # Bounded because a poster has tens of runs, not thousands, and an
+    # unbounded list is a way to spend a request handler's afternoon.
+    changes: list[TextChange] = Field(max_length=200)

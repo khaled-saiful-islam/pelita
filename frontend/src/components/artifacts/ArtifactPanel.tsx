@@ -1,19 +1,23 @@
 import { useState } from 'react'
 import {
   AlertTriangle,
+  Check,
   Code2,
   Download,
   Eye,
   Link2,
   Loader2,
+  Pencil,
   SquareArrowOutUpRight,
   X,
 } from 'lucide-react'
 import { Alert, Button } from '@/components/ui'
 import { BuildSteps } from '@/components/artifacts/BuildSteps'
 import { ArtifactFrame } from '@/components/artifacts/ArtifactFrame'
+import { EditableFrame } from '@/components/artifacts/EditableFrame'
 import { ShareArtifactDialog } from '@/components/artifacts/ShareArtifactDialog'
 import { useArtifact } from '@/hooks/useArtifact'
+import { apiFetch } from '@/lib/api'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
 /**
@@ -36,6 +40,32 @@ export function ArtifactPanel({
   const { artifact, fit, error, loading, reload } = useArtifact(artifactId)
   const [showing, setShowing] = useState<'preview' | 'source'>('preview')
   const [sharing, setSharing] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  // Collected rather than sent per keystroke: one version per edit, not one
+  // per letter.
+  const [changes, setChanges] = useState<Map<number, string>>(new Map())
+
+  async function saveText() {
+    if (!artifact || changes.size === 0) {
+      setEditing(false)
+      return
+    }
+    setSaving(true)
+    try {
+      await apiFetch(`/artifacts/${artifact.id}/text`, {
+        method: 'POST',
+        body: JSON.stringify({
+          changes: [...changes].map(([index, text]) => ({ index, text })),
+        }),
+      })
+      setChanges(new Map())
+      setEditing(false)
+      await reload(artifact.id)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const building = !artifactId && !!build
   const measuring = !!artifact && fit === null
@@ -79,7 +109,27 @@ export function ArtifactPanel({
               )}
             </Button>
           )}
-          {artifact && (
+          {artifact && showing === 'preview' && (
+            <Button
+              variant={editing ? 'primary' : 'ghost'}
+              size="sm"
+              disabled={saving}
+              onClick={() => (editing ? void saveText() : setEditing(true))}
+              title={editing ? 'Save the words' : 'Edit the words in place'}
+            >
+              {editing ? (
+                <>
+                  <Check className="size-4" aria-hidden />
+                  <span className="hidden sm:inline">
+                    {changes.size ? `Save ${changes.size}` : 'Done'}
+                  </span>
+                </>
+              ) : (
+                <Pencil className="size-4" aria-hidden />
+              )}
+            </Button>
+          )}
+          {artifact && !editing && (
             <Button
               variant="ghost"
               size="sm"
@@ -89,7 +139,7 @@ export function ArtifactPanel({
               <Link2 className="size-4" aria-hidden />
             </Button>
           )}
-          {artifact && (
+          {artifact && !editing && (
             // A plain link, not fetch-and-blob: the browser already knows how
             // to save a file the server marked as an attachment.
             <a
@@ -102,7 +152,7 @@ export function ArtifactPanel({
               </Button>
             </a>
           )}
-          {artifact && (
+          {artifact && !editing && (
             <a
               href={`/api/artifacts/${artifact.id}/raw?version=${artifact.version}`}
               target="_blank"
@@ -142,7 +192,25 @@ export function ArtifactPanel({
           </div>
         )}
 
-        {artifact && !measuring && showing === 'preview' && (
+        {artifact && !measuring && showing === 'preview' && editing && (
+          <>
+            <p className="mx-4 mt-4 rounded-md bg-surface px-3 py-2 text-xs text-muted-foreground">
+              Click any words on the poster to change them. Only the words change — nothing else
+              about the design moves.
+            </p>
+            <EditableFrame
+              html={artifact.html}
+              width={artifact.width}
+              height={artifact.height}
+              title={artifact.title}
+              onChange={(index, text) =>
+                setChanges((current) => new Map(current).set(index, text))
+              }
+            />
+          </>
+        )}
+
+        {artifact && !measuring && showing === 'preview' && !editing && (
           <>
             {fit && !fit.fits && (
               <div

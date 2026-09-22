@@ -20,8 +20,10 @@ from app.api.schemas.artifact import (
     ArtifactShareResponse,
     ArtifactSummary,
     ArtifactVersionSummary,
+    EditTextRequest,
 )
 from app.artifacts.registry import build_kinds
+from app.artifacts.text_edit import apply_text, readable_text
 from app.core.errors import NotFoundError
 from app.db.models.artifact import Artifact, ArtifactVersion
 from app.db.models.artifact_share import ArtifactShare
@@ -94,6 +96,50 @@ async def read(
         sandbox=kind.sandbox.iframe_sandbox if kind else "",
         versions=[ArtifactVersionSummary.model_validate(v) for v in artifact.versions],
     )
+
+
+@router.get("/{artifact_id}/text", response_model=list[str])
+async def text(
+    artifact_id: UUID, session: SessionDep, user: CurrentUser, version: int | None = None
+) -> list[str]:
+    """The words on it, in the order they appear.
+
+    Here so a caller can check its numbering against the server's before
+    sending changes, rather than discovering a mismatch by corrupting a poster.
+    """
+    _, chosen = await _load(session, artifact_id, user.id, version)
+    return readable_text(chosen.html)
+
+
+@router.post("/{artifact_id}/text", response_model=ArtifactDetail)
+async def edit_text(
+    artifact_id: UUID,
+    payload: EditTextRequest,
+    session: SessionDep,
+    user: CurrentUser,
+    settings: SettingsDep,
+) -> ArtifactDetail:
+    """Change the words. No model, no wait, no chance of a different poster.
+
+    Every tag, attribute and byte of CSS is copied through untouched, which is
+    what makes this safe to do with nothing checking the result. It is still a
+    new version, because an edit that overwrites what it replaced cannot be
+    undone.
+    """
+    repo = SqlArtifactRepository(session)
+    artifact, current = await _load(session, artifact_id, user.id)
+
+    edited = apply_text(current.html, {c.index: c.text for c in payload.changes})
+    if edited != current.html:
+        await repo.add_version(
+            artifact,
+            html=edited,
+            design_spec=current.design_spec,
+            model=current.model,
+        )
+        await session.commit()
+
+    return await read(artifact_id, session, user, settings)
 
 
 @router.get("/{artifact_id}/raw", response_class=Response)
