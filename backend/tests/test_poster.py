@@ -19,8 +19,10 @@ from app.artifacts.base import (
     ArtifactUnavailable,
     Brief,
     Chunk,
+    DesignSpec,
     Finished,
     Step,
+    Swatch,
 )
 from app.artifacts.model import ArtifactModel, parse_object, strip_fence
 from app.artifacts.poster import PosterKind
@@ -367,3 +369,61 @@ def test_the_prompts_have_not_drifted() -> None:
     line. If you meant it, update the digest in the same commit as the prompt."""
     combined = "\n".join([DIRECTION_SYSTEM, COMPOSE_SYSTEM, REFINE_SYSTEM]).encode()
     assert hashlib.sha256(combined).hexdigest()[:16] == "7a1dc01932f32d19"
+
+
+# --- asking for a change ------------------------------------------------
+
+
+async def revise(kind: PosterKind, html: str = POSTER, instruction: str = "make the price bigger"):
+    return [
+        update
+        async for update in kind.revise(
+            html=html,
+            spec=DesignSpec(
+                movement="Midnight Brass",
+                palette=(Swatch(name="ground", hex="#12151C"),),
+                width=1080,
+                height=1350,
+            ),
+            instruction=instruction,
+        )
+    ]
+
+
+async def test_a_revision_keeps_the_direction_it_already_has() -> None:
+    """Re-deciding the direction is how "make the date bigger" comes back as a
+    different poster."""
+    provider = FakeArtifactProvider()
+    updates = await revise(poster_for(provider))
+
+    # One call, not three: no direction step and no refinement pass.
+    assert len(provider.prompts) == 1
+    assert "Midnight Brass" in provider.prompts[0]
+    assert DIRECTION_SYSTEM not in provider.prompts
+    assert updates[-1].built.spec.movement == "Midnight Brass"
+
+
+async def test_the_change_and_the_poster_both_reach_the_model() -> None:
+    provider = FakeArtifactProvider()
+    await revise(poster_for(provider), instruction="make the price bigger")
+
+    sent = provider.requests[0].messages[1].content
+    assert "make the price bigger" in sent
+    assert "THE POSTER AS IT STANDS" in sent
+    # Wrapped, because it came from a person through a text box.
+    assert '<user_context type="change">' in sent
+
+
+async def test_a_revision_that_comes_back_broken_is_refused() -> None:
+    """The poster they are looking at still works. Shipping a broken one to
+    honour the request is worse than saying no."""
+    broken = "<!DOCTYPE html><html><body><div>no canvas here</div></body></html>"
+    provider = FakeArtifactProvider(documents=[broken])
+
+    with pytest.raises(ArtifactUnavailable, match="left as it was"):
+        await revise(poster_for(provider))
+
+
+async def test_a_revision_reports_what_it_is_doing() -> None:
+    updates = await revise(poster_for(FakeArtifactProvider()))
+    assert [u.label for u in updates if isinstance(u, Step)] == ["Redrawing", "Checking it fits"]

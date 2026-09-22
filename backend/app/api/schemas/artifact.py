@@ -61,3 +61,7 @@ class EditTextRequest(BaseModel):
     # Bounded because a poster has tens of runs, not thousands, and an
     # unbounded list is a way to spend a request handler's afternoon.
     changes: list[TextChange] = Field(max_length=200)
+
+
+class ReviseRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=1000)

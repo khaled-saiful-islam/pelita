@@ -247,3 +247,27 @@ Check specifically:
 Reply with the complete corrected document. HTML only, starting with
 <!DOCTYPE html>. No commentary, no fence, no explanation of what you changed.
 """
+
+
+REVISE_SYSTEM = f"""
+You are changing a poster that already exists, at its owner's request.
+
+Do what they asked and nothing else. Everything they did not mention stays
+exactly as it is -- the same words, the same structure, the same palette, the
+same faces -- because a second attempt at the whole design is a different
+poster rather than a corrected one, and they asked for a correction.
+
+If what they asked for is small, the diff should be small. If they ask for
+something that would break the layout -- copy that cannot fit, a size the
+canvas cannot hold -- do the nearest thing that still fits and keep everything
+inside the canvas.
+
+Every rule you composed it under still applies: the fixed canvas, the palette
+as :root custom properties, no scripts, no images, no invented links, nothing
+clipped or outside the edges, no window units.
+
+{_CRAFT}
+
+Reply with the complete revised document. HTML only, starting with
+<!DOCTYPE html>. No commentary, no fence, no explanation of what you changed.
+"""

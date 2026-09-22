@@ -24,6 +24,7 @@ from dataclasses import replace
 from time import perf_counter
 
 from app.artifacts.base import (
+    ArtifactUnavailable,
     Brief,
     BuildUpdate,
     Built,
@@ -43,6 +44,7 @@ from app.artifacts.poster_prompts import (
     MAX_CANVAS,
     MIN_CANVAS,
     REFINE_SYSTEM,
+    REVISE_SYSTEM,
 )
 from app.artifacts.validate import Finding, check, repair_request
 from app.providers.base import Usage, UsageSource
@@ -162,15 +164,64 @@ class PosterKind:
             document, spec=spec, sandbox=self.sandbox, max_bytes=self._max_bytes
         )
 
+    async def revise(
+        self, *, html: str, spec: DesignSpec, instruction: str
+    ) -> AsyncIterator[BuildUpdate]:
+        """Change an existing poster, keeping the direction it already has.
+
+        The direction step is skipped: it was settled when the poster was made,
+        and re-deciding it is how "make the date bigger" comes back as a
+        different poster. So is the refinement pass, because the person is
+        already looking at the result and can ask again.
+        """
+        started = perf_counter()
+        yield Step(label="Redrawing", detail=instruction[:80])
+
+        written = Written()
+        request = (
+            f'<user_context type="change">{instruction}</user_context>\n\n'
+            f"THE POSTER AS IT STANDS:\n\n{html}"
+        )
+        async for piece in self._model.write(
+            f"{REVISE_SYSTEM}\n{self._direction_block(spec)}", request, written, temperature=0.2
+        ):
+            yield Chunk(text=piece)
+
+        revised, usage = written.text, written.usage
+        yield Step(label="Checking it fits")
+        findings = self._check(revised, spec)
+        if findings:
+            # A revision that arrived broken is not an improvement. The poster
+            # they are looking at still works.
+            logger.info("revision rejected: %s", findings[0])
+            raise ArtifactUnavailable(
+                f"That change came back with a problem: {findings[0]}. "
+                "The poster has been left as it was."
+            )
+
+        yield Finished(
+            built=Built(
+                html=revised,
+                spec=spec,
+                model=self._model.name,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                build_ms=int((perf_counter() - started) * 1000),
+            )
+        )
+
     async def _direct(self, context: str) -> DesignSpec:
         raw = await self._model.decide(DIRECTION_SYSTEM, context)
         spec = DesignSpec.from_dict(raw)
         return _with_fallbacks(spec)
 
     def _compose_system(self, spec: DesignSpec) -> str:
+        return f"{COMPOSE_SYSTEM}\n{self._direction_block(spec)}"
+
+    def _direction_block(self, spec: DesignSpec) -> str:
+        """The direction, written out for whichever prompt is using it."""
         return "\n".join(
             [
-                COMPOSE_SYSTEM,
                 "",
                 "THE DIRECTION YOU ARE COMPOSING",
                 f"Movement: {spec.movement}",

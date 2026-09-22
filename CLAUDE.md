@@ -43,6 +43,7 @@ have designed it wrong — pass the values in.
 | Guards | `guards/base.py` | `guards/registry.py` |
 | Prompt sources | `context/base.py` | `context/registry.py` |
 | Tools | `tools/base.py` | `tools/registry.py` |
+| Artifact kinds | `artifacts/base.py` | `artifacts/registry.py` |
 | Search backends | `tools/serpapi.py` | used by the tools above |
 | File readers | `services/document_extract.py` | `classify()` |
 | Vision backends | `vision/base.py` | `vision/registry.py` |
@@ -157,6 +158,7 @@ SSE events from `/api/chat/stream`:
 
 ```
 start · guard · tool · images · sources · token · usage · suggestions · done · error
+artifact.start · artifact.step · artifact.delta · artifact.done · artifact.failed
 ```
 
 Adding an event type is additive — a client that does not recognise one ignores
@@ -169,6 +171,24 @@ conversation.
 
 `done` is always last. `usage` always arrives, including on cancellation and
 error, because those tokens were still paid for.
+
+## Artifacts
+
+An artifact is **one self-contained HTML document** — a poster today, a deck or
+a small app later. Not a component and not a template plus data: a document is
+the only format the browser, the printer, the share link and the download all
+already understand, which is why this feature adds no service and no
+dependency.
+
+A *kind* owns its prompt, its canvas and its sandbox policy, and declares the
+last of those itself. A poster is static art, so the frame it renders in cannot
+execute a script; the same `SandboxPolicy` drives the iframe attribute and the
+CSP header, so the preview, a new tab and a shared link cannot disagree about
+what a document may do.
+
+The chat model writes a **brief** and never code. A separate model with its own
+budget directs, composes, is validated and refines. Feature notes and the known
+limits are in `docs/features/024-artifacts.md`.
 
 ## A turn has four phases
 

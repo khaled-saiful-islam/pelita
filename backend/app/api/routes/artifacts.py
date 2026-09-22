@@ -21,10 +21,12 @@ from app.api.schemas.artifact import (
     ArtifactSummary,
     ArtifactVersionSummary,
     EditTextRequest,
+    ReviseRequest,
 )
+from app.artifacts.base import ArtifactUnavailable, DesignSpec, Finished
 from app.artifacts.registry import build_kinds
 from app.artifacts.text_edit import apply_text, readable_text
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ValidationError
 from app.db.models.artifact import Artifact, ArtifactVersion
 from app.db.models.artifact_share import ArtifactShare
 from app.db.repositories.artifacts import SqlArtifactRepository
@@ -139,6 +141,55 @@ async def edit_text(
         )
         await session.commit()
 
+    return await read(artifact_id, session, user, settings)
+
+
+@router.post("/{artifact_id}/revise", response_model=ArtifactDetail)
+async def revise(
+    artifact_id: UUID,
+    payload: ReviseRequest,
+    session: SessionDep,
+    user: CurrentUser,
+    settings: SettingsDep,
+) -> ArtifactDetail:
+    """Ask for a change to the design itself.
+
+    One composing call, from the direction the poster already has. The
+    direction step is skipped because it was settled when the poster was made,
+    and the refinement pass is skipped because the person is looking at the
+    result and can simply ask again.
+    """
+    repo = SqlArtifactRepository(session)
+    artifact, current = await _load(session, artifact_id, user.id)
+    kind = build_kinds(settings).get(artifact.kind)
+    if kind is None or not hasattr(kind, "revise"):
+        raise ValidationError("This kind of artifact cannot be revised.")
+
+    built = None
+    try:
+        async for update in kind.revise(
+            html=current.html,
+            spec=DesignSpec.from_dict(current.design_spec or {}),
+            instruction=payload.instruction,
+        ):
+            if isinstance(update, Finished):
+                built = update.built
+    except ArtifactUnavailable as exc:
+        raise ValidationError(str(exc)) from exc
+
+    if built is None:
+        raise ValidationError("The design model returned nothing. The poster is unchanged.")
+
+    await repo.add_version(
+        artifact,
+        html=built.html,
+        design_spec=built.spec.as_dict(),
+        model=built.model,
+        prompt_tokens=built.prompt_tokens,
+        completion_tokens=built.completion_tokens,
+        build_ms=built.build_ms,
+    )
+    await session.commit()
     return await read(artifact_id, session, user, settings)
 
 

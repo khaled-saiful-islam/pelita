@@ -9,6 +9,7 @@ import {
   Loader2,
   Pencil,
   SquareArrowOutUpRight,
+  Wand2,
   X,
 } from 'lucide-react'
 import { Alert, Button } from '@/components/ui'
@@ -45,6 +46,30 @@ export function ArtifactPanel({
   // Collected rather than sent per keystroke: one version per edit, not one
   // per letter.
   const [changes, setChanges] = useState<Map<number, string>>(new Map())
+  const [instruction, setInstruction] = useState('')
+  const [revising, setRevising] = useState(false)
+  const [revisionError, setRevisionError] = useState<string | null>(null)
+
+  async function revise(event: React.FormEvent) {
+    event.preventDefault()
+    if (!artifact || !instruction.trim() || revising) return
+    setRevising(true)
+    setRevisionError(null)
+    try {
+      await apiFetch(`/artifacts/${artifact.id}/revise`, {
+        method: 'POST',
+        body: JSON.stringify({ instruction: instruction.trim() }),
+      })
+      setInstruction('')
+      await reload(artifact.id)
+    } catch (cause) {
+      // The poster they are looking at is untouched, so this is a message and
+      // not a broken panel.
+      setRevisionError((cause as Error).message)
+    } finally {
+      setRevising(false)
+    }
+  }
 
   async function saveText() {
     if (!artifact || changes.size === 0) {
@@ -241,6 +266,33 @@ export function ArtifactPanel({
           </pre>
         )}
       </div>
+
+      {artifact && !editing && showing === 'preview' && (
+        <form onSubmit={revise} className="shrink-0 border-t border-border p-3">
+          {revisionError && <Alert className="mb-2">{revisionError}</Alert>}
+          <div className="flex items-center gap-2">
+            <input
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+              disabled={revising}
+              placeholder="Ask for a change — warmer colours, bigger date…"
+              aria-label="Ask for a change to the design"
+              className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+            <Button type="submit" size="sm" disabled={revising || !instruction.trim()}>
+              {revising ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Wand2 className="size-4" aria-hidden />
+              )}
+              <span className="hidden sm:inline">{revising ? 'Redrawing' : 'Change'}</span>
+            </Button>
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            Changing words only? Use the pencil — it is instant and nothing else moves.
+          </p>
+        </form>
+      )}
 
       {sharing && artifact && (
         <ShareArtifactDialog
