@@ -63,6 +63,10 @@ export function ArtifactPanel({
   const title = artifact?.title ?? build?.title ?? 'Artifact'
 
   const deck = !!artifact && isDeck(artifact.kind, artifact.html)
+  // Decided by the kind, because what a download should be is a
+  // property of the thing: a picture of a game is its first frame with
+  // nobody playing.
+  const playable = artifact?.kind === 'games'
   const slides = useMemo(
     () => (artifact && deck ? slidesOf(artifact.html) : []),
     [artifact, deck],
@@ -187,7 +191,7 @@ export function ArtifactPanel({
               <Button variant="ghost" size="sm" onClick={() => setSharing(true)} title="Share a link">
                 <Link2 className="size-4" aria-hidden />
               </Button>
-              <DownloadMenu artifact={artifact} deck={deck} />
+              <DownloadMenu artifact={artifact} deck={deck} playable={playable} />
               <a
                 href={`/api/artifacts/${artifact.id}/raw?version=${artifact.version}`}
                 target="_blank"
@@ -338,9 +342,12 @@ export function ArtifactPanel({
 function DownloadMenu({
   artifact,
   deck,
+  playable,
 }: {
   artifact: { id: string; version: number }
   deck: boolean
+  /** A game: the file is the thing, and there is no picture of it. */
+  playable?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const base = `/api/artifacts/${artifact.id}/download?version=${artifact.version}`
@@ -360,27 +367,37 @@ function DownloadMenu({
         <>
           <span className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
           <span className="absolute right-0 top-full z-20 mt-1 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-background py-1 shadow-lg">
-            <a
-              href={base}
-              download
-              onClick={() => setOpen(false)}
-              className="px-3 py-2 text-left text-xs hover:bg-hover"
-            >
-              <span className="block font-medium">
-                {deck ? 'Slides (PDF)' : 'Picture (PNG)'}
-              </span>
-              <span className="block text-muted-foreground">
-                {deck ? 'One slide a page, to present or send' : 'To post or send'}
-              </span>
-            </a>
+            {/* A game has one download, because a picture of one is its first
+                frame with nobody playing. The file opens and plays anywhere. */}
+            {!playable && (
+              <a
+                href={base}
+                download
+                onClick={() => setOpen(false)}
+                className="px-3 py-2 text-left text-xs hover:bg-hover"
+              >
+                <span className="block font-medium">
+                  {deck ? 'Slides (PDF)' : 'Picture (PNG)'}
+                </span>
+                <span className="block text-muted-foreground">
+                  {deck ? 'One slide a page, to present or send' : 'To post or send'}
+                </span>
+              </a>
+            )}
             <a
               href={`${base}&format=html`}
               download
               onClick={() => setOpen(false)}
               className="px-3 py-2 text-left text-xs hover:bg-hover"
             >
-              <span className="block font-medium">Document (HTML)</span>
-              <span className="block text-muted-foreground">To edit or print later</span>
+              <span className="block font-medium">
+                {playable ? 'Game (HTML)' : 'Document (HTML)'}
+              </span>
+              <span className="block text-muted-foreground">
+                {playable
+                  ? 'One file. Open it in any browser and play'
+                  : 'To edit or print later'}
+              </span>
             </a>
           </span>
         </>

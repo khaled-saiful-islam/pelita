@@ -55,7 +55,17 @@ async def _ensure_browser() -> Any:
             # about containers: /dev/shm defaults to 64 MB and Chromium wants
             # more.
             _browser = await _playwright.chromium.launch(
-                args=["--disable-dev-shm-usage"]
+                args=[
+                    "--disable-dev-shm-usage",
+                    # Headless Chromium treats its own window as occluded and
+                    # throttles `requestAnimationFrame` down to nothing. A
+                    # poster does not care; a game playtested under that looks
+                    # exactly like a game whose loop has died. Harmless to the
+                    # exports, which run with scripting off entirely.
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
+                    "--disable-background-timer-throttling",
+                ]
             )
         except Exception as exc:  # noqa: BLE001 - any launch failure is the same to a caller
             raise RasterUnavailable(

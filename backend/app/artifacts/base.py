@@ -71,7 +71,11 @@ class SandboxPolicy:
         preview — the document gets an opaque origin, so it cannot read a cookie
         or call the API with one."""
         sandbox = "sandbox allow-scripts" if self.scripts else "sandbox"
-        script_src = "https:" if self.scripts else "'none'"
+        # Inline only. An artifact is one self-contained file by contract, so
+        # every script it runs is already in it — and `https:` would have been
+        # both too much (any origin on the web) and too little (it does not
+        # permit an inline script at all, so the document would not run).
+        script_src = "'unsafe-inline'" if self.scripts else "'none'"
         style_src = "'unsafe-inline'"
         font_src = "'none'"
         if self.fonts:
@@ -87,6 +91,7 @@ class SandboxPolicy:
                 f"style-src {style_src}",
                 f"font-src {font_src}",
                 f"img-src {img_src}",
+                "connect-src 'none'",
                 "form-action 'none'",
                 "base-uri 'none'",
             ]

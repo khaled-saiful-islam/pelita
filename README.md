@@ -17,6 +17,8 @@ the conversation.
 
 ![A six-slide deck, each slide on one of the grounds its design chose](docs/images/pelita-slides.png)
 
+![A snake game, played to a game over, from a one-line brief](docs/images/pelita-game.png)
+
 Nothing is templated. The two decks below were asked for the same way, and the
 design named its own grounds and picked its own faces for each subject:
 
@@ -82,6 +84,7 @@ default.
 | **Share links** | A public, read-only link to a conversation. A frozen copy, so later messages stay private; revocable, and never indexed |
 | **Posters** | Ask for one and a poster is designed, not filled into a template — its own palette, type and layout, with photographs found on the web and embedded so the file stands alone. Opens in a panel beside the chat: share, open, download as PNG |
 | **Slide decks** | A deck planned as a talk, then written one slide at a time so the first appears while the last is still being made. Three grounds it moves between, 16:9 enforced, photographs where they earn their place. Download as PDF |
+| **Games** | A playable browser game, in one HTML file that opens anywhere. It is run in a real browser before you see it — keys pressed, console read — and what broke goes back to the model to fix. Keyboard *and* touch, pause, restart, and no network |
 | **Editing an artifact** | Ask in the chat box and only what you named changes — a colour change touches two lines of a 237 KB document, not the whole design. Fixing a word in place takes no model call and no new version |
 | **Export** | Any conversation as Markdown |
 | **Theme** | Light, dark, or follow the system |
@@ -148,7 +151,7 @@ backend/app/
 ├── guards/      base.py (Protocol) + prompt_injection.py + registry.py
 ├── context/     the ordered contributor pipeline
 ├── tools/       serpapi.py, news_mcp.py, artifact.py
-├── artifacts/   base.py (Protocol) + poster.py + slides.py + registry.py
+├── artifacts/   base.py (Protocol) + poster.py + slides.py + games.py + registry.py
 └── db/          models, repositories, session
 frontend/src/styles/theme.css    every colour, in one file
 ```

@@ -1,8 +1,8 @@
-# 024 — Artifacts: posters and slide decks
+# 024 — Artifacts: posters, slide decks and games
 
 ## What it does
 
-Ask for a poster and get one — designed, not templated — built while you watch
+Ask for a poster, a deck or a game and get one — designed, not templated — built while you watch
 and opened in a panel beside the conversation.
 
 ```
@@ -22,6 +22,8 @@ you   Design a wide banner for a badminton tournament at Dewan
 ![A poster designed from a one-line brief](../images/pelita-poster.png)
 
 ![A deck, each slide on one of the grounds its design chose](../images/pelita-slides.png)
+
+![A game, played to a game over, from a one-line brief](../images/pelita-game.png)
 
 ![The build in progress: steps, timings and the palette it chose](../images/pelita-building.png)
 
@@ -128,6 +130,57 @@ it belongs. All three make a new version; correcting a word with the pencil
 still does not.
 
 **Downloading** a deck gives a PDF, one slide to a page.
+
+### Games, and the one kind that executes
+
+A game is the first artifact here that runs code, and the architecture already
+had the place for it: `SandboxPolicy` is declared per kind, so `scripts=True`
+is the whole of the privilege change. The frame gets `allow-scripts` and
+**not** `allow-same-origin`, which is an opaque origin -- the game cannot read
+a cookie, reach the page that framed it, or call this API with credentials.
+The same policy becomes the CSP when the file is served on its own, and
+`connect-src 'none'` means it cannot phone home from either.
+
+It is built in three steps, and the third is the one that matters.
+
+| step | produces |
+|---|---|
+| **design** | the loop, the pressure, the levels *with their numbers*, palette, faces |
+| **write** | the whole self-contained document, in one call |
+| **playtest** | it is run in a real browser, and what broke goes back to be fixed |
+
+The design step exists because "snake" is not a brief. What makes a game worth
+five minutes is the one decision the player makes over and over and how it gets
+harder, so that is decided and named first -- and levels are specified in
+numbers (`speed_ms: 140`), because "faster" is not a level.
+
+**The playtest is the part that is not done elsewhere.** A poster is wrong in
+ways you can see by reading it. A game is wrong in ways that only appear once
+the loop starts: a function called on the first frame and defined nowhere is
+invisible to any parser. So the browser already present for PNG and PDF export
+opens the game, lets it run, presses the arrow keys and space, clicks, and
+reports. Four things come back: what the console said, whether anything was
+painted, whether the game is still asking for frames, and whether it tried to
+reach the network. Up to two fixes are attempted before it is shown with the
+problem named.
+
+Counting the loop is subtler than it looks. A browser ticks whether or not
+anything is listening, so "did `requestAnimationFrame` fire" says nothing --
+the question is whether the *game* asked for another frame. A counter is
+prepended to the document, wrapping `requestAnimationFrame` and `setInterval`,
+and counts the game's own calls. Injecting it with `add_init_script` instead
+does not work: that runs at document-start of a navigation and `set_content`
+rewrites the document, so the counter came back `undefined` and every game
+looked stopped.
+
+What a static read still catches first, because it is cheaper than a browser:
+a `while (true)` that would hang the tab rather than throw, a `fetch`, a
+`<script src>`, no loop at all, and nothing reading input. Only the contents of
+`<script>` are searched, so a game *about* networking may say `fetch` in its
+own text.
+
+A game downloads as HTML and nothing else. A picture of a game is its first
+frame with nobody playing.
 
 ### A photograph, when the design wants one
 
@@ -254,6 +307,7 @@ ARTIFACT_TIMEOUT_SECONDS=300
 ARTIFACT_REFINE_PASS=true        # roughly doubles the wall clock
 ARTIFACT_MAX_BYTES=1500000        # generous: a photograph travels inside the file
 ARTIFACT_EXPORT_PNG=true         # needs Chromium in the image
+ARTIFACT_PLAYTEST=true           # run a game before showing it; same Chromium
 ARTIFACT_MAX_PER_CONVERSATION=10
 ```
 
@@ -278,6 +332,15 @@ documented failure of every implementation that has tried it.
 
 ## Known limits
 
+- **A game is played by a robot, not a person.** The playtest presses keys and
+  looks for crashes. It does not know whether the game is any *good*, whether
+  level three is reachable, or whether the collisions are fair.
+- **A game is changed by rewriting it.** A find-and-replace inside a program
+  does not fail loudly; it stops working somewhere the person has not reached
+  yet. The rewrite costs more and is checked by playing the result.
+- **The playtest adds a few seconds** to every game build and needs the same
+  Chromium the PNG export does. `ARTIFACT_PLAYTEST=false` skips it, and the
+  game is shipped unplayed with the person told so.
 - **The model cannot make a picture, only find one.** There is no image model
   here, so a photograph is searched for. When nothing suitable is found the
   poster is designed without one.

@@ -9,6 +9,7 @@ list to keep in step.
 from __future__ import annotations
 
 from app.artifacts.base import ArtifactKind
+from app.artifacts.games import GamesKind
 from app.artifacts.model import ArtifactModel
 from app.artifacts.poster import PosterKind
 from app.artifacts.slides import SlidesKind
@@ -49,6 +50,11 @@ def build_kinds(settings: Settings | None = None) -> dict[str, ArtifactKind]:
             refine=settings.artifact_refine_pass,
             max_bytes=settings.artifact_max_bytes,
             search=search,
+        ),
+        GamesKind(
+            model,
+            max_bytes=settings.artifact_max_bytes,
+            playtest=settings.artifact_playtest,
         ),
         SlidesKind(
             model,

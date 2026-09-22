@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     # downloads and shares without reaching for anything.
     artifact_max_bytes: int = 1_500_000
     artifact_max_per_conversation: int = 10
+    # A game is run in a real browser before anybody sees it, and what the
+    # console said goes back to the model as the next thing to fix. Costs a
+    # few seconds per build and needs the same Chromium the PNG export does.
+    # Off, and a game is shipped unplayed, with the person told so.
+    artifact_playtest: bool = True
     # Exporting a poster as a picture needs a real browser in the image. Off,
     # and the download gives the document instead of a picture.
     artifact_export_png: bool = True
