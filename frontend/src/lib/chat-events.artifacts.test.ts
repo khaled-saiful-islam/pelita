@@ -13,6 +13,7 @@ function handlers(): StreamHandlers {
     onArtifactStart: vi.fn(),
     onArtifactStep: vi.fn(),
     onArtifactDelta: vi.fn(),
+    onArtifactPart: vi.fn(),
     onArtifactDone: vi.fn(),
     onArtifactFailed: vi.fn(),
     onSuggestions: vi.fn(),
@@ -35,6 +36,26 @@ describe('artifact frames', () => {
     // `id`, not `artifact_id`: the card and the panel look it up by the same
     // key the REST shape uses, and a second name for it opens nothing.
     expect(h.onArtifactDone).toHaveBeenCalledWith({ id: 'a1', version: 1 })
+  })
+
+  it('keeps pieces in order however they land', async () => {
+    // Slides are written several at a time and finish out of sequence. A deck
+    // that appears out of order is worse than one that appears slowly.
+    const { mergePart } = await import('./chat-events')
+    const part = (index: number) => ({ index, total: 3, title: `s${index}`, html: '' })
+
+    let parts = mergePart([], part(2))
+    parts = mergePart(parts, part(1))
+    parts = mergePart(parts, part(3))
+
+    expect(parts.map((p) => p.index)).toEqual([1, 2, 3])
+  })
+
+  it('replaces a piece rather than duplicating it', async () => {
+    const { mergePart } = await import('./chat-events')
+    const first = { index: 1, total: 2, title: 'draft', html: 'a' }
+    const again = { index: 1, total: 2, title: 'final', html: 'b' }
+    expect(mergePart([first], again)).toEqual([again])
   })
 
   it('routes a failure', () => {

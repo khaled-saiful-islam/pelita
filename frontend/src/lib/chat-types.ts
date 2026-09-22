@@ -67,12 +67,23 @@ export interface ArtifactDetail extends Artifact {
 
 /** A build in progress. Held separately from the finished artifact because it
  *  has no id yet and may never get one. */
+/** One finished piece of something built in parts — a slide of a deck. */
+export interface ArtifactPart {
+  index: number
+  total: number
+  title: string
+  html: string
+}
+
 export interface ArtifactBuild {
   kind: string
   title: string
   steps: { label: string; detail: string }[]
   /** The document as it is written. Shown as source; the preview waits. */
   source: string
+  /** Pieces finished so far, in order. A deck shows slide one while slide
+   *  seven is still being written. */
+  parts: ArtifactPart[]
   failed?: string | null
 }
 

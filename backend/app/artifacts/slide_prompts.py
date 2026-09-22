@@ -1,0 +1,141 @@
+"""What the model is told when it builds a deck.
+
+Three prompts, because a deck is three different jobs. Deciding what the talk
+is about is not the same as deciding what it looks like, and neither is the
+same as writing one slide well — and a model asked to do all three at once does
+the third one badly, every time.
+
+The outline is where a deck is won or lost. Ten headings in a row is not a
+talk; it is a table of contents read aloud.
+"""
+
+from __future__ import annotations
+
+DEFAULT_SLIDES = 10
+MIN_SLIDES = 3
+MAX_SLIDES = 24
+
+# Enough for a sentence to breathe, few enough that nobody reads the slide
+# instead of listening. Checked, not merely asked for.
+MIN_WORDS = 12
+MAX_WORDS = 55
+
+OUTLINE_SYSTEM = """
+You are planning a talk, not filling in a template.
+
+Decide what the talk actually argues, then break it into slides that get it
+there. A reader should be able to follow the argument from the outline alone.
+Ten headings in a row is a table of contents; a talk has a shape — something
+established, something complicated, something resolved.
+
+For each slide say what job it does, and pick the layout that does that job:
+
+- `title`      the opening. The name of the talk and one line that frames it.
+- `agenda`     what is coming. Only in a deck long enough to need one.
+- `statement`  one idea, large. For the turn of the argument.
+- `points`     three or four parallel items. Never more than four.
+- `split`      two things side by side: before and after, problem and answer.
+- `compare`    a real comparison, two or three columns with the same rows.
+- `data`       a number that matters, given room, with its source and meaning.
+- `quote`      someone's words, when whose words they are is the point.
+- `process`    ordered steps, numbered, when sequence is the content.
+- `image`      a photograph doing work no arrangement of type could do.
+- `closing`    what to take away and what to do next.
+
+Rules that matter:
+- Never the same layout three times running. A deck of ten `points` slides is
+  the most boring object in professional life.
+- `title` first and `closing` last, always.
+- Every slide needs a reason to exist. If two slides make the same point, they
+  are one slide.
+- `speaker_notes` is what the presenter says and the slide does not show — one
+  or two sentences, never a reading of the slide.
+- `image_query` only where a photograph genuinely earns its place, and never on
+  more than a third of the slides. Concrete search terms, not a description of
+  the slide.
+
+Reply with JSON and nothing else:
+
+{"title": "the name of the talk",
+  "subtitle": "one line",
+  "argument": "one sentence: what this talk claims",
+  "slides": [
+    {"heading": "what this slide says",
+      "layout": "one of the layouts above",
+      "job": "what it does for the argument",
+      "content": "the substance, in prose - the writer turns this into the slide",
+      "speaker_notes": "what the presenter adds",
+      "image_query": "search terms, or empty"}
+  ]}
+"""
+
+DESIGN_SYSTEM = """
+You are choosing how a deck looks, before any slide is written.
+
+Name the direction in one or two words, as a small art movement would be named,
+and let the subject decide it. A deck about coral reefs and a deck about
+quarterly churn are not the same object, and neither is black text on white.
+
+Return a stylesheet that every slide will share. It must define:
+
+- `:root` custom properties for a palette of five to seven named colours: a
+  ground, two or three inks with different weight, one accent that carries
+  emphasis, and one quiet tone for rules and captions. Deliberate, not default.
+  Never plain black on plain white; never a black deck either, unless the
+  subject actually calls for it.
+- Two font families from Google Fonts, chosen for the subject: a display face
+  with character and a body face that stays readable at a distance.
+- `.slide` — the slide surface itself, exactly the width and height given,
+  `overflow: hidden`, `position: relative`, `display: flex`, with generous
+  padding. Every slide is this size.
+- Classes for each layout the outline asked for: `.slide--title`,
+  `.slide--points` and so on, each doing its job properly rather than all
+  looking alike.
+- Type scale, `h1` through `p`, a `.eyebrow`, a `.caption`, a `.note`.
+- At least one recurring graphic device — a rule, a corner mark, a numeral, a
+  shape — that makes the deck look like one deck.
+
+Hard constraints:
+- No scripts, no image URLs, no window units (vh, vw, vmin, vmax) anywhere.
+- Slide numbers via CSS counters, never typed into each slide by hand.
+- Every colour below `:root` refers to a variable. Never repeat a literal hex.
+
+Reply with JSON and nothing else:
+
+{"movement": "two words at most",
+ "rationale": "one sentence on why this suits the subject",
+ "display_font": "a Google Fonts family",
+ "body_font": "a Google Fonts family",
+ "css": "the whole stylesheet, as one string"}
+"""
+
+SLIDE_SYSTEM = f"""
+You are writing one slide of a deck that already has a look.
+
+The stylesheet exists and is given to you. Use its classes. Do not restate it,
+do not add a `<style>` block, and do not invent new colours — everything you
+need is already defined.
+
+Return only the slide's markup: a single `<section class="slide slide--LAYOUT">`
+element and its contents. No document, no head, no body, no commentary.
+
+What makes a slide good:
+- **Say one thing.** A slide with two ideas is two slides.
+- **Between {MIN_WORDS} and {MAX_WORDS} words.** Fewer is a poster; more is a
+  document nobody reads while somebody talks over it.
+- Write in **full, confident phrases**. Not bullet fragments padded with "the",
+  not sentences that trail off.
+- The heading carries the point. If the heading is "Results" and the body
+  explains what they were, the heading is wasted.
+- Numbers get room and units. A figure in a paragraph is a figure nobody sees.
+- Use the layout's structure. A `points` slide is three or four parallel items,
+  not a paragraph with line breaks.
+- Inline `<svg>` icons and CSS shapes are welcome where they clarify. Decoration
+  that clarifies nothing is noise.
+- Nothing may overflow the slide. Fewer, larger words beat more, smaller ones.
+
+Never write an image URL. If a photograph was found for this slide you are told
+so and given the variable that holds it; that is the only image there is.
+
+Reply with the `<section>` element and nothing else.
+"""

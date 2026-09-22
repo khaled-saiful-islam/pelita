@@ -102,6 +102,28 @@ class Drafting:
 
 
 @dataclass(frozen=True, slots=True)
+class Planned:
+    """The pieces an artifact is going to have, named before they exist."""
+
+    titles: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Piece:
+    """Part of an artifact, finished ahead of the rest.
+
+    Sent so the panel can show slide one while slide seven is still being
+    written. In order, whatever order they finished in: a deck that appears
+    out of sequence is worse than one that appears slowly.
+    """
+
+    index: int
+    total: int
+    title: str
+    html: str
+
+
+@dataclass(frozen=True, slots=True)
 class Made:
     """A finished artifact, handed back for the caller to store.
 
@@ -117,7 +139,7 @@ class Made:
     replaces: Any | None = None
 
 
-ToolUpdate = Progress | Results | Making | Drafting | Made
+ToolUpdate = Progress | Results | Making | Drafting | Planned | Piece | Made
 
 
 @runtime_checkable

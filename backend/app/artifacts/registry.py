@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.artifacts.base import ArtifactKind
 from app.artifacts.model import ArtifactModel
 from app.artifacts.poster import PosterKind
+from app.artifacts.slides import SlidesKind
 from app.core.config import Settings, get_settings
 from app.providers.openai_compatible import OpenAICompatibleProvider
 from app.tools.serpapi import SerpApiSearch
@@ -48,6 +49,13 @@ def build_kinds(settings: Settings | None = None) -> dict[str, ArtifactKind]:
             refine=settings.artifact_refine_pass,
             max_bytes=settings.artifact_max_bytes,
             search=search,
-        )
+        ),
+        SlidesKind(
+            model,
+            # A deck is a dozen slides and their pictures, so it is allowed to
+            # be several times the size of one poster.
+            max_bytes=settings.artifact_max_bytes * 8,
+            search=search,
+        ),
     ]
     return {kind.name: kind for kind in kinds}

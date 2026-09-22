@@ -9,7 +9,14 @@
 import { useCallback, useRef, useState } from 'react'
 import { apiFetch } from '@/lib/api'
 import { readSse } from '@/lib/sse'
-import { addUsage, dispatchFrame, mergeSources, mergeStep, mergeTool } from '@/lib/chat-events'
+import {
+  addUsage,
+  dispatchFrame,
+  mergePart,
+  mergeSources,
+  mergeStep,
+  mergeTool,
+} from '@/lib/chat-events'
 import { splitStoredSources } from '@/lib/messages'
 import type {
   Artifact,
@@ -309,7 +316,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
             onArtifactStart: (start) => {
               setOpenArtifact(null)
               patchActive({
-                building: { ...start, steps: [], source: '', failed: null },
+                building: { ...start, steps: [], source: '', parts: [], failed: null },
               })
             },
             onArtifactStep: (step) => {
@@ -317,6 +324,9 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
             },
             onArtifactDelta: (text) => {
               patchBuild((build) => ({ ...build, source: build.source + text }))
+            },
+            onArtifactPart: (part) => {
+              patchBuild((build) => ({ ...build, parts: mergePart(build.parts, part) }))
             },
             onArtifactDone: (artifact) => {
               const id = assistantIdRef.current

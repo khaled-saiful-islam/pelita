@@ -10,6 +10,7 @@
 import type { SseMessage } from './sse'
 import type {
   Artifact,
+  ArtifactPart,
   GuardAlert,
   ImageResult,
   Source,
@@ -29,6 +30,7 @@ export interface StreamHandlers {
   onArtifactStart: (start: { kind: string; title: string }) => void
   onArtifactStep: (step: { label: string; detail: string }) => void
   onArtifactDelta: (text: string) => void
+  onArtifactPart: (part: ArtifactPart) => void
   onArtifactDone: (artifact: Artifact & { findings: string[] }) => void
   onArtifactFailed: (failure: { message: string; retryable: boolean }) => void
   onSuggestions: (items: string[]) => void
@@ -67,6 +69,8 @@ export function dispatchFrame(frame: SseMessage, handlers: StreamHandlers): void
       )
     case 'artifact.delta':
       return handlers.onArtifactDelta(String(payload.text ?? ''))
+    case 'artifact.part':
+      return handlers.onArtifactPart(payload as unknown as ArtifactPart)
     case 'artifact.done':
       return handlers.onArtifactDone(
         payload as unknown as Artifact & { findings: string[] },
@@ -150,4 +154,19 @@ export function mergeStep(
   const last = steps[steps.length - 1]
   if (last && last.label === next.label) return [...steps.slice(0, -1), next]
   return [...steps, next]
+}
+
+
+/**
+ * Add a finished piece, keeping them in order.
+ *
+ * They are generated several at a time and can land out of sequence. A deck
+ * that appears out of order is worse than one that appears slowly.
+ */
+export function mergePart(
+  parts: import('./chat-types').ArtifactPart[],
+  next: import('./chat-types').ArtifactPart,
+): import('./chat-types').ArtifactPart[] {
+  const without = parts.filter((part) => part.index !== next.index)
+  return [...without, next].sort((a, b) => a.index - b.index)
 }

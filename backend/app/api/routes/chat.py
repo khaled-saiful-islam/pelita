@@ -24,6 +24,8 @@ from app.services.events import (
     ArtifactDeltaEvent,
     ArtifactDoneEvent,
     ArtifactFailedEvent,
+    ArtifactPartEvent,
+    ArtifactPlanEvent,
     ArtifactStartEvent,
     ArtifactStepEvent,
     DeltaEvent,
@@ -133,6 +135,23 @@ def _to_sse(event: object) -> dict[str, str] | None:
             }
         case ArtifactDeltaEvent():
             return {"event": "artifact.delta", "data": json.dumps({"text": event.text})}
+        case ArtifactPlanEvent():
+            return {
+                "event": "artifact.plan",
+                "data": json.dumps({"titles": list(event.titles)}),
+            }
+        case ArtifactPartEvent():
+            return {
+                "event": "artifact.part",
+                "data": json.dumps(
+                    {
+                        "index": event.index,
+                        "total": event.total,
+                        "title": event.title,
+                        "html": event.html,
+                    }
+                ),
+            }
         case ArtifactDoneEvent():
             return {
                 "event": "artifact.done",

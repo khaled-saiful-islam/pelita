@@ -105,6 +105,28 @@ class ArtifactDeltaEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class ArtifactPlanEvent:
+    """The shape of what is coming, before any of it is made."""
+
+    titles: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactPartEvent:
+    """One piece of a multi-part artifact, ready to look at.
+
+    A ten-slide deck takes a minute or two. Showing slide one as soon as it
+    exists turns that into something happening rather than something waited
+    for.
+    """
+
+    index: int
+    total: int
+    title: str
+    html: str
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactDoneEvent:
     artifact_id: UUID
     kind: str
@@ -146,6 +168,8 @@ ChatEvent = (
     | ArtifactStartEvent
     | ArtifactStepEvent
     | ArtifactDeltaEvent
+    | ArtifactPlanEvent
+    | ArtifactPartEvent
     | ArtifactDoneEvent
     | ArtifactFailedEvent
     | DoneEvent

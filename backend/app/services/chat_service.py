@@ -71,6 +71,8 @@ from app.services.events import (
     ArtifactDeltaEvent,
     ArtifactDoneEvent,
     ArtifactFailedEvent,
+    ArtifactPartEvent,
+    ArtifactPlanEvent,
     ArtifactStartEvent,
     ArtifactStepEvent,
     ChatEvent,
@@ -93,6 +95,8 @@ from app.tools.base import (
     Drafting,
     Made,
     Making,
+    Piece,
+    Planned,
     Progress,
     ProgressiveTool,
     Results,
@@ -492,6 +496,17 @@ class ChatService:
                     continue
                 if isinstance(update, Drafting):
                     yield ArtifactDeltaEvent(text=update.text)
+                    continue
+                if isinstance(update, Planned):
+                    yield ArtifactPlanEvent(titles=update.titles)
+                    continue
+                if isinstance(update, Piece):
+                    yield ArtifactPartEvent(
+                        index=update.index,
+                        total=update.total,
+                        title=update.title,
+                        html=update.html,
+                    )
                     continue
                 if isinstance(update, Made):
                     made += 1

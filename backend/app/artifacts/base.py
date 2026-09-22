@@ -268,11 +268,39 @@ class Chunk:
 
 
 @dataclass(frozen=True, slots=True)
+class Plan:
+    """What is about to be made, before any of it exists.
+
+    A deck announces its slides by name first, so the panel can put up the
+    whole shape and fill it in. Watching a plan become a deck is a different
+    experience from watching a spinner, and it is the same information.
+    """
+
+    titles: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Part:
+    """One finished piece of an artifact that has several.
+
+    A deck is built a slide at a time, and a slide that is done is worth
+    looking at while the rest are still coming. `html` is a whole small
+    document so the panel can render it without waiting for the others or
+    knowing how the finished thing will be assembled.
+    """
+
+    index: int
+    total: int
+    title: str
+    html: str
+
+
+@dataclass(frozen=True, slots=True)
 class Finished:
     built: Built
 
 
-BuildUpdate = Step | Chunk | Finished
+BuildUpdate = Step | Chunk | Plan | Part | Finished
 
 
 @runtime_checkable
