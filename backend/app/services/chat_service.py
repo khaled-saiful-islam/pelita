@@ -22,10 +22,11 @@ from __future__ import annotations
 import json
 import logging
 from asyncio import Event
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field, replace
 from time import perf_counter
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,7 +81,17 @@ from app.services.language_service import detect_language
 from app.services.memory_service import MemoryService
 from app.services.search_intent import SearchDecision, decide
 from app.services.suggestion_service import suggest
-from app.tools.base import Tool, ToolUnavailable, first_argument, tool_schema
+from app.tools.base import (
+    Progress,
+    ProgressiveTool,
+    Results,
+    Tool,
+    ToolUnavailable,
+    ToolUpdate,
+    bind_arguments,
+    missing_arguments,
+    tool_schema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -343,7 +354,7 @@ class ChatService:
             return
 
         async for event in self._run_tool(
-            tool, state, query=state.question, detail=decision.reason
+            tool, state, arguments={"query": state.question}, detail=decision.reason
         ):
             yield event
 
@@ -379,7 +390,7 @@ class ChatService:
         tool: Tool,
         state: TurnState,
         *,
-        query: str,
+        arguments: dict[str, Any],
         detail: str,
         sink: list[str] | None = None,
     ) -> AsyncIterator[ChatEvent]:
@@ -397,8 +408,20 @@ class ChatService:
         )
 
         started = perf_counter()
+        found = 0
         try:
-            found = tuple(await tool.run(query=query))
+            async for update in _updates(tool, arguments):
+                if isinstance(update, Progress):
+                    yield ToolEvent(
+                        tool=tool.name,
+                        status="running",
+                        label=update.label,
+                        detail=update.detail,
+                    )
+                    continue
+                found += len(update.items)
+                for event in self._record(state, update.items, sink):
+                    yield event
         except ToolUnavailable as exc:
             # A failed tool degrades the answer; it does not end the turn. The
             # model answers from what it knows and the UI says what was missed.
@@ -414,8 +437,22 @@ class ChatService:
             tool=tool.name,
             status="done",
             label=tool.presentation.done,
-            detail=_summarise(len(found), tool.presentation.noun, started),
+            detail=_summarise(found, tool.presentation.noun, started),
         )
+
+    def _record(
+        self, state: TurnState, found: tuple[ToolResult, ...], sink: list[str] | None
+    ) -> Iterator[ChatEvent]:
+        """Take one batch of results into the turn.
+
+        Pictures and pages are told apart by shape — a result carrying a
+        thumbnail is one — so a new tool returning images gets the grid without
+        naming itself anywhere.
+        """
+        if not found:
+            if sink is not None:
+                sink.append("The search returned no usable results.")
+            return
 
         if any(result.is_image for result in found):
             state.image_results = (*state.image_results, *found)
@@ -583,22 +620,24 @@ class ChatService:
                 )
                 continue
 
-            query = first_argument(tool, arguments)
-            if not query:
+            bound = bind_arguments(tool, arguments)
+            missing = missing_arguments(tool, bound)
+            if missing:
+                named = ", ".join(missing)
                 yield ToolEvent(
                     tool=tool.name,
                     status="failed",
                     label="Nothing to look up",
-                    detail="no usable argument",
+                    detail=f"missing {named}",
                 )
-                self._answer_call(state, call, "No usable argument was given.")
+                self._answer_call(state, call, f"Missing required argument: {named}.")
                 continue
 
             sink: list[str] = []
             # `detail` is what the model chose to look up, which tells the user
             # more than a regex's reason ever did.
             async for event in self._run_tool(
-                tool, state, query=query, detail=query, sink=sink
+                tool, state, arguments=bound, detail=_asked_for(bound), sink=sink
             ):
                 yield event
             self._answer_call(state, call, "\n\n".join(sink))
@@ -949,6 +988,26 @@ class ChatService:
             )
 
         return start, state
+
+
+async def _updates(tool: Tool, arguments: dict[str, Any]) -> AsyncIterator[ToolUpdate]:
+    """A tool's output as a stream, whichever kind of tool it is.
+
+    A tool that narrates yields as it goes; one that does not is adapted into a
+    single batch, so the caller has one shape to handle and neither kind needs
+    to know the other exists.
+    """
+    if isinstance(tool, ProgressiveTool):
+        async for update in tool.stream(**arguments):
+            yield update
+        return
+    yield Results(items=tuple(await tool.run(**arguments)))
+
+
+def _asked_for(bound: dict[str, Any]) -> str:
+    """What the model chose to look up, for the chip under the answer."""
+    said = ", ".join(str(value) for value in bound.values() if str(value).strip())
+    return said if len(said) <= 120 else f"{said[:119]}\u2026"
 
 
 def _summarise(count: int, noun: str, started: float) -> str:

@@ -200,6 +200,17 @@ class WeatherTool(Tool):
     async def run(self, **kwargs) -> Sequence[ToolResult]: ...
 ```
 
+A tool is handed **every argument it declared** and nothing else — `bind_arguments`
+drops what the model invented, and keeps the near-miss rescue (`q` for `query`)
+for single-parameter tools only. A missing required argument is reported by name
+rather than as "no usable argument", because the model can only fix a call it
+understands.
+
+A tool whose work takes tens of seconds implements `stream` instead (subclass
+`StreamingTool`), yielding `Progress` and `Results` as it goes. The service
+checks for that by shape — `isinstance(tool, ProgressiveTool)` — never by name,
+which is the same rule that decides an image result from its `thumbnail_url`.
+
 `ChatService` never names a tool except in `_select_tool`, which is the single
 place selection happens. `backend/tests/test_tool_protocol.py` adds a tool the
 codebase has never heard of and asserts it runs, labels itself and fails

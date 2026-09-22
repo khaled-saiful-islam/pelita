@@ -9,7 +9,7 @@ service, one of these fails.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import pytest
@@ -17,7 +17,16 @@ import pytest
 from app.core.config import Settings
 from app.providers.base import ToolCall, ToolResult
 from app.services.events import ImagesEvent, SourcesEvent, ToolEvent
-from app.tools.base import Tool, ToolPresentation, ToolUnavailable, text_parameter
+from app.tools.base import (
+    Progress,
+    Results,
+    StreamingTool,
+    Tool,
+    ToolPresentation,
+    ToolUnavailable,
+    ToolUpdate,
+    text_parameter,
+)
 from app.tools.registry import build_tools
 from tests.test_chat_service import FakeProvider, build_service, collect
 
@@ -241,3 +250,175 @@ async def test_tools_do_not_run_when_the_turn_does_not_call_for_them(
         search_mode=mode,
     )
     assert weather.calls == []
+
+
+# --- arguments ----------------------------------------------------------
+
+
+class BookingTool(Tool):
+    """Two parameters — what a single-string seam could not carry."""
+
+    name = "booking"
+    description = "Check room availability in a city."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string", "description": "Where to stay"},
+            "nights": {"type": "integer", "description": "How many nights"},
+        },
+        "required": ["city"],
+    }
+    presentation = ToolPresentation(
+        running="Checking rooms", done="Checked rooms", noun="room"
+    )
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def run(self, **kwargs: Any) -> Sequence[ToolResult]:
+        self.calls.append(kwargs)
+        return [
+            ToolResult(
+                tool=self.name,
+                title="Hotel Kopi",
+                url="https://rooms.test/kopi",
+                snippet="Two rooms left",
+                rank=1,
+            )
+        ]
+
+
+def asking_for(tool: Tool, arguments: dict[str, Any], session, registry):
+    """A service whose model asks for `tool` with exactly these arguments."""
+    provider = FakeProvider(
+        ["done"],
+        tool_calls=[
+            ToolCall(id="call_1", name=tool.name, arguments=json.dumps(arguments))
+        ],
+    )
+    return provider, build_service(
+        session, provider, registry, tools={tool.name: tool}, tool_calling=True
+    )
+
+
+async def turn(service, db_user, content="find me a room in Ipoh"):
+    return await collect(
+        service,
+        user_id=db_user.id,
+        conversation_id=None,
+        content=content,
+        search_mode="always",
+    )
+
+
+async def test_a_tool_receives_every_argument_it_declared(
+    session, db_user, registry
+) -> None:
+    booking = BookingTool()
+    _, service = asking_for(booking, {"city": "Ipoh", "nights": 2}, session, registry)
+
+    await turn(service, db_user)
+
+    assert booking.calls == [{"city": "Ipoh", "nights": 2}]
+
+
+async def test_arguments_the_tool_never_declared_are_dropped(
+    session, db_user, registry
+) -> None:
+    """A model that invents `limit` must not reach a tool that never offered it."""
+    booking = BookingTool()
+    _, service = asking_for(
+        booking, {"city": "Ipoh", "limit": 99, "debug": True}, session, registry
+    )
+
+    await turn(service, db_user)
+
+    assert booking.calls == [{"city": "Ipoh"}]
+
+
+async def test_one_declared_argument_survives_a_plausible_wrong_key(
+    session, db_user, registry
+) -> None:
+    """`q` for `query` is the common near-miss. It runs rather than failing."""
+    weather = WeatherTool()
+    _, service = asking_for(weather, {"q": "Penang"}, session, registry)
+
+    await turn(service, db_user)
+
+    assert weather.calls == [{"query": "Penang"}]
+
+
+async def test_a_missing_required_argument_is_reported_and_still_answered(
+    session, db_user, registry
+) -> None:
+    """An unanswered tool_call_id is a protocol error on the next request, so
+    the failure has to be said in the exchange and not only on screen."""
+    booking = BookingTool()
+    provider, service = asking_for(booking, {"nights": 2}, session, registry)
+
+    events = await turn(service, db_user)
+
+    assert booking.calls == []
+    failed = [e for e in events if isinstance(e, ToolEvent) and e.status == "failed"]
+    assert failed and "city" in failed[0].detail
+
+    answered = [
+        message
+        for request in provider.requests
+        for message in request.messages
+        if message.tool_call_id == "call_1"
+    ]
+    assert answered and "city" in answered[0].content
+
+
+# --- progress -----------------------------------------------------------
+
+
+class SurveyTool(StreamingTool):
+    """A tool with an interior. It says what it is doing as it goes."""
+
+    name = "survey"
+    description = "Take a while, visibly."
+    parameters = text_parameter("topic", "What to survey")
+    presentation = ToolPresentation(
+        running="Starting the survey", done="Surveyed", noun="finding"
+    )
+
+    async def stream(self, **kwargs: Any) -> AsyncIterator[ToolUpdate]:
+        yield Progress(label="Reading the brief", detail=str(kwargs["topic"]))
+        yield Progress(label="Counting", detail="halfway")
+        yield Results(
+            items=(
+                ToolResult(
+                    tool=self.name,
+                    title="Finding",
+                    url="https://survey.test/1",
+                    snippet="Most people said yes",
+                    rank=1,
+                ),
+            )
+        )
+
+
+async def test_a_tool_can_say_what_it_is_doing_while_it_works(
+    session, db_user, registry
+) -> None:
+    _, service = asking_for(SurveyTool(), {"topic": "kopi"}, session, registry)
+
+    events = await turn(service, db_user)
+
+    labels = [e.label for e in events if isinstance(e, ToolEvent)]
+    assert labels == ["Starting the survey", "Reading the brief", "Counting", "Surveyed"]
+    assert [e.status for e in events if isinstance(e, ToolEvent)][-1] == "done"
+
+
+async def test_a_progressive_tools_results_are_recorded_like_any_others(
+    session, db_user, registry
+) -> None:
+    """Progress is presentation. What it found still becomes a citation."""
+    _, service = asking_for(SurveyTool(), {"topic": "kopi"}, session, registry)
+
+    events = await turn(service, db_user)
+
+    sources = next(e.sources for e in events if isinstance(e, SourcesEvent))
+    assert [s.title for s in sources] == ["Finding"]

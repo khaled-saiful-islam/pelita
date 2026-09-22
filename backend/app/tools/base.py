@@ -11,7 +11,7 @@ only the selection changes.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -52,6 +52,61 @@ class Tool(Protocol):
     async def run(self, **kwargs: Any) -> Sequence[ToolResult]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class Progress:
+    """Something a tool wants said while it is still working.
+
+    A search is over before anyone reads the chip. Work measured in tens of
+    seconds is not, and a tool that goes quiet for a minute is
+    indistinguishable from one that has hung.
+    """
+
+    label: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Results:
+    """What a tool found. The same shape whether it arrived all at once or
+    in instalments, so nothing downstream needs to know which."""
+
+    items: tuple[ToolResult, ...]
+
+
+ToolUpdate = Progress | Results
+
+
+@runtime_checkable
+class ProgressiveTool(Protocol):
+    """A tool with an interior worth narrating.
+
+    Checked by shape, never by name — the same rule that decides an image
+    result from its `thumbnail_url` rather than from which tool returned it.
+    """
+
+    async def stream(self, **kwargs: Any) -> AsyncIterator[ToolUpdate]: ...
+
+
+class StreamingTool:
+    """Implement `stream`; `run` follows from it.
+
+    Here so a narrating tool is not obliged to write the same collection loop
+    every time, and so it still satisfies `Tool` for every caller that only
+    wants the results.
+    """
+
+    async def stream(self, **kwargs: Any) -> AsyncIterator[ToolUpdate]:  # pragma: no cover
+        raise NotImplementedError
+        yield  # pragma: no cover - makes this an async generator
+
+    async def run(self, **kwargs: Any) -> Sequence[ToolResult]:
+        found: list[ToolResult] = []
+        async for update in self.stream(**kwargs):
+            if isinstance(update, Results):
+                found.extend(update.items)
+        return found
+
+
 def tool_schema(tool: Tool) -> dict[str, Any]:
     """The OpenAI function-calling description of a tool.
 
@@ -84,6 +139,44 @@ def first_argument(tool: Tool, arguments: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def bind_arguments(tool: Tool, arguments: dict[str, Any]) -> dict[str, Any]:
+    """What the model sent, reduced to what the tool declared.
+
+    Undeclared keys are dropped rather than forwarded: a model that decides to
+    add `limit` to a search must not reach a tool that never offered one, and
+    `run(**kwargs)` would accept it silently.
+
+    A tool with exactly one parameter keeps the near-miss rescue — `q` for
+    `query` runs instead of failing. It is deliberately not extended to tools
+    with several parameters, where guessing which value was meant for which
+    name is how a booking for Ipoh becomes a booking for two.
+    """
+    declared = tool.parameters.get("properties") or {}
+    bound = {name: arguments[name] for name in declared if name in arguments}
+
+    required = tuple(tool.parameters.get("required") or ())
+    if len(declared) == 1 and len(required) == 1 and required[0] not in bound:
+        rescued = first_argument(tool, arguments)
+        if rescued:
+            bound[required[0]] = rescued
+    return bound
+
+
+def missing_arguments(tool: Tool, bound: dict[str, Any]) -> tuple[str, ...]:
+    """Required parameters the model did not usably supply.
+
+    Blank counts as missing. An empty string reaches a tool as an argument and
+    comes back as a confusing result rather than a clear refusal.
+    """
+    required = tuple(tool.parameters.get("required") or ())
+    return tuple(
+        name
+        for name in required
+        if bound.get(name) is None
+        or (isinstance(bound[name], str) and not bound[name].strip())
+    )
 
 
 def text_parameter(name: str, description: str) -> dict[str, Any]:

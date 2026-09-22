@@ -376,7 +376,9 @@ async def test_an_argumentless_call_is_answered(session, db_user, registry) -> N
 
     assert tool.calls == []
     tool_message = [m for m in provider.requests[1].messages if m.role is Role.TOOL][0]
-    assert "No usable argument" in tool_message.content
+    # Named, not just refused: the model can only fix the call if it is told
+    # which argument was missing.
+    assert "query" in tool_message.content
 
 
 async def test_two_calls_in_one_round_both_run(session, db_user, registry) -> None:
