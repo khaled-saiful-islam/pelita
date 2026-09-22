@@ -204,23 +204,45 @@ def _encode(raw: bytes, *, source: str) -> Photo | None:
     )
 
 
-def attach_photo(document: str, photo: Photo) -> str:
-    """Put the picture into the document's `:root`, where the CSS already
-    expects it.
+# Any declaration of the variable, whoever wrote it.
+_ANY_DECLARATION = re.compile(
+    r"[ \t]*" + re.escape(_VARIABLE) + r"\s*:[^;{}]*;[ \t]*\n?", re.IGNORECASE
+)
+# `:root { ... }`, so the picture can go in as the last word on the subject.
+_ROOT_BLOCK = re.compile(r"(:root\s*\{)([^{}]*)(\})", re.IGNORECASE | re.S)
 
-    Done here rather than in the prompt because a base64 photograph costs more
-    tokens than the entire poster, and the model has no use for the bytes.
+
+def attach_photo(document: str, photo: Photo) -> str:
+    """Put the picture into the document's `:root`, and make sure it stays put.
+
+    Two things have to be true, and only the first is obvious.
+
+    It goes in last. CSS takes the final declaration of a custom property, and
+    a model told that `--photo` exists will sometimes declare it as well — once
+    as `--photo: var(--photo)`, which is self-referential, which CSS treats as
+    invalid, which leaves the poster with a photograph embedded in it and
+    nothing on screen. That is a real poster this happened to.
+
+    So any declaration already there is removed first, ours is appended at the
+    end of the block, and there is exactly one.
     """
     declaration = f'  {_VARIABLE}: url("{photo.data_uri}");\n'
-    match = re.search(r":root\s*\{", document)
-    if match is None:
-        # No :root to extend. Give it one, immediately inside the stylesheet.
-        style = re.search(r"<style[^>]*>", document, re.IGNORECASE)
-        if style is None:
-            return document
-        block = f"\n:root {{\n{declaration}}}\n"
-        return document[: style.end()] + block + document[style.end() :]
-    return document[: match.end()] + "\n" + declaration + document[match.end() :]
+
+    root = _ROOT_BLOCK.search(document)
+    if root is not None:
+        cleaned = _ANY_DECLARATION.sub("", root.group(2))
+        block = f"{root.group(1)}{cleaned}{declaration}{root.group(3)}"
+        return document[: root.start()] + block + document[root.end() :]
+
+    # No :root to extend. Give it one, immediately inside the stylesheet.
+    style = re.search(r"<style[^>]*>", document, re.IGNORECASE)
+    if style is None:
+        return document
+    without = _ANY_DECLARATION.sub("", document)
+    at = re.search(r"<style[^>]*>", without, re.IGNORECASE)
+    if at is None:  # pragma: no cover - the tag was just found
+        return document
+    return without[: at.end()] + f"\n:root {{\n{declaration}}}\n" + without[at.end() :]
 
 
 # The declaration `attach_photo` writes, so it can be taken back out again.
@@ -291,9 +313,14 @@ def photo_brief(photo: Photo) -> str:
         "A photograph has been found for this poster and is already available "
         f"as the CSS variable `{_VARIABLE}`, holding a url() of a "
         f"{photo.width}x{photo.height} image.\n"
-        f"Use it with `background-image: var({_VARIABLE})` on the full-bleed "
-        "background layer, with `background-size: cover` and "
-        "`background-position: center`.\n"
+        f"Use it with `background-image: var({_VARIABLE})`, with "
+        "`background-size: cover` and `background-position: center`. If the "
+        "brief asks for it in the background, it covers the whole canvas "
+        "behind everything else — not a band, not a panel, not a corner.\n"
+        f"Do NOT declare `{_VARIABLE}` yourself. It is already declared. "
+        f"Writing `{_VARIABLE}: var({_VARIABLE})` in `:root`, which is the "
+        "tempting thing to do, is self-referential, and CSS discards it — the "
+        "poster then has a photograph inside it and nothing on screen.\n"
         "It is a photograph, so put a scrim over it — a gradient or a flat "
         "colour at partial opacity drawn from the palette — and set every word "
         "above it in a colour that clears 4.5:1 against the darkest part of "

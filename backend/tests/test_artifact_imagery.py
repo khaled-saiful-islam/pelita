@@ -336,3 +336,40 @@ def test_a_document_with_no_invented_urls_is_untouched() -> None:
 
     document = "<html><head><style>.bg{background-image:var(--photo)}</style></head></html>"
     assert use_the_real_photograph(document) == (document, 0)
+
+
+def test_the_photograph_wins_when_the_model_declares_the_variable_too() -> None:
+    """CSS takes the last declaration of a custom property. A model told the
+    variable exists sometimes declares it as well — as `--photo: var(--photo)`,
+    which is self-referential, which CSS discards, which leaves a poster with a
+    photograph embedded in it and nothing on screen.
+
+    A real poster this happened to: "Add one image: beach with sunset in the
+    BG" produced a document containing the picture and showing none of it.
+    """
+    document = (
+        "<html><head><style>\n:root {\n  --ground: #0A1B3D;\n"
+        "  --photo: var(--photo);\n}\n.bg{background-image:var(--photo)}\n"
+        "</style></head><body></body></html>"
+    )
+
+    attached = attach_photo(document, PHOTO)
+
+    assert attached.count("--photo:") == 1
+    assert "--photo: var(--photo)" not in attached
+    assert f'--photo: url("{PHOTO.data_uri}");' in attached
+    # And ours is the last word inside the block.
+    root = attached[attached.index(":root") : attached.index("}", attached.index(":root"))]
+    assert root.rstrip().endswith(";")
+    assert root.index("--photo") > root.index("--ground")
+
+
+def test_a_second_attach_does_not_stack_declarations() -> None:
+    once = attach_photo(POSTER, PHOTO)
+    twice = attach_photo(once, PHOTO)
+    assert twice.count("--photo:") == 1
+
+
+def test_the_model_is_told_not_to_declare_it() -> None:
+    assert "Do NOT declare" in photo_brief(PHOTO)
+    assert "behind everything else" in photo_brief(PHOTO)
