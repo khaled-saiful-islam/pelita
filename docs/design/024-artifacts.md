@@ -186,6 +186,21 @@ failure and a validation failure stack into a single incoherent instruction.
 An edit is a follow-up chat turn. The model is given the current HTML and the
 `DesignSpec`, and returns a whole new document, stored as a new version.
 
+Not every edit pays for a call. `DesignSpec` names the palette hexes and the
+two font roles, so the cheapest class of edit is a substitution:
+
+| edit | how | cost |
+|---|---|---|
+| palette or font swap | replace the spec's hex values and font families in the document | no model call, instant |
+| copy, layout, content | one compose call from the spec plus the current HTML — no direction step, no refinement | ~30-50s |
+| a new direction entirely | the full pipeline again, as a new artifact | ~40-90s |
+
+The first row works because the spec is stored rather than inferred: "make it
+blue" or "try a serif" is a find-and-replace over values we chose deliberately
+and wrote down. The second skips two of the four steps because the direction
+was settled when the poster was first made, and re-deciding it is how an edit
+turns into a different poster.
+
 The obvious alternative is search-and-replace patching, and Claude's own
 artifacts do exactly that today. Two pieces of evidence argue against it for a
 first implementation: the original artifacts re-emitted the whole document and
@@ -352,6 +367,8 @@ model — that is the whole lesson from the linked bug.
 - **One artifact per turn.** Two would race for the same panel and double the
   turn's cost with no way to show either properly.
 - **Refinement doubles the wall clock.** A poster is 40–90 seconds with it on.
+- **A content edit costs a compose call.** Only palette and font changes are
+  free; anything touching the words or the layout is ~30-50 seconds.
 - **Print fidelity is the browser's.** No bleed, no crop marks, no CMYK. A4 at
   96dpi is a screen document that prints well, not a press-ready file.
 - **`artifact.delta` shows source, not preview.** There is no progressive
