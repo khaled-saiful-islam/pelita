@@ -33,5 +33,9 @@ def build_kinds(settings: Settings | None = None) -> dict[str, ArtifactKind]:
         ),
         max_tokens=settings.artifact_max_tokens,
     )
-    kinds: list[ArtifactKind] = [PosterKind(model, refine=settings.artifact_refine_pass)]
+    kinds: list[ArtifactKind] = [PosterKind(
+            model,
+            refine=settings.artifact_refine_pass,
+            max_bytes=settings.artifact_max_bytes,
+        )]
     return {kind.name: kind for kind in kinds}

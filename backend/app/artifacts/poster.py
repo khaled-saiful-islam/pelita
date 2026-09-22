@@ -44,6 +44,7 @@ from app.artifacts.poster_prompts import (
     MIN_CANVAS,
     REFINE_SYSTEM,
 )
+from app.artifacts.validate import Finding, check, repair_request
 from app.providers.base import Usage, UsageSource
 
 logger = logging.getLogger(__name__)
@@ -85,9 +86,12 @@ class PosterKind:
     canvas = A4_AT_96DPI
     sandbox = SandboxPolicy(scripts=False, fonts=True, images=False)
 
-    def __init__(self, model: ArtifactModel, *, refine: bool = True) -> None:
+    def __init__(
+        self, model: ArtifactModel, *, refine: bool = True, max_bytes: int = 262_144
+    ) -> None:
         self._model = model
         self._refine = refine
+        self._max_bytes = max_bytes
 
     async def build(self, brief: Brief) -> AsyncIterator[BuildUpdate]:
         started = perf_counter()
@@ -104,6 +108,24 @@ class PosterKind:
             yield Chunk(text=piece)
 
         html, usage = written.text, written.usage
+
+        yield Step(label="Checking it fits")
+        findings = self._check(html, spec)
+        if findings:
+            yield Step(label="Fixing a problem", detail=str(findings[0]))
+            repaired = Written()
+            async for _ in self._model.write(
+                self._compose_system(spec), repair_request(html, findings), repaired,
+                temperature=0.1,
+            ):
+                pass
+            # Only if it is actually better. A repair that broke something else
+            # is not an improvement, and the original at least renders.
+            if repaired.text and len(self._check(repaired.text, spec)) < len(findings):
+                html = repaired.text
+                usage = _summed(usage, repaired.usage)
+                findings = self._check(html, spec)
+
         if self._refine:
             yield Step(label="Refining")
             polished = Written()
@@ -113,7 +135,10 @@ class PosterKind:
                 pass
             # A refinement that came back empty or truncated is not an
             # improvement. The composed document is already good.
-            if len(polished.text) > len(html) * 0.6:
+            # Kept only if it is whole and did not break anything the
+            # composed document had right. A refinement is a nicety; a
+            # document that renders is not.
+            if len(polished.text) > len(html) * 0.6 and not self._check(polished.text, spec):
                 html = polished.text
                 usage = _summed(usage, polished.usage)
 
@@ -125,7 +150,16 @@ class PosterKind:
                 prompt_tokens=usage.prompt_tokens,
                 completion_tokens=usage.completion_tokens,
                 build_ms=int((perf_counter() - started) * 1000),
+                # Whatever survived the repair. Recorded rather than raised:
+                # a poster with one imperfection is worth far more to the
+                # person who asked than a refusal.
+                findings=tuple(str(finding) for finding in findings),
             )
+        )
+
+    def _check(self, document: str, spec: DesignSpec) -> tuple[Finding, ...]:
+        return check(
+            document, spec=spec, sandbox=self.sandbox, max_bytes=self._max_bytes
         )
 
     async def _direct(self, context: str) -> DesignSpec:

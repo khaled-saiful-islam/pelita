@@ -191,6 +191,7 @@ two font roles, so the cheapest class of edit is a substitution:
 
 | edit | how | cost |
 |---|---|---|
+| a word on the poster is wrong | edit it in place, in the frame | no model call, instant |
 | palette or font swap | replace the spec's hex values and font families in the document | no model call, instant |
 | copy, layout, content | one compose call from the spec plus the current HTML — no direction step, no refinement | ~30-50s |
 | a new direction entirely | the full pipeline again, as a new artifact | ~40-90s |
@@ -200,6 +201,25 @@ blue" or "try a serif" is a find-and-replace over values we chose deliberately
 and wrote down. The second skips two of the four steps because the direction
 was settled when the poster was first made, and re-deciding it is how an edit
 turns into a different poster.
+
+**Editing text in place.** The commonest edit is a typo, a price or a date,
+and going through a model for it is absurd. The panel has an edit mode that
+makes the poster's own text directly editable, and saves the result as a new
+version like any other edit.
+
+The complication is that a poster renders with scripts disabled, so nothing can
+make its text editable from outside — a sandboxed frame is opaque to its
+parent, which is the whole point of it. Edit mode therefore re-renders the
+frame with `allow-scripts` and a small editor **we** inject: it marks text
+nodes `contenteditable`, and posts what changed back over `postMessage`. That
+script is ours and is never model output, and the validator already guarantees
+the document contains no script of its own, so nothing model-authored ever
+executes. The frame still has no `allow-same-origin`, so the editor cannot
+reach the app, its cookies or its API either.
+
+The parent applies the returned text by replacing those exact nodes in the
+stored HTML. Nothing else in the document is touched, which is what makes this
+safe to do without a model checking the result.
 
 The obvious alternative is search-and-replace patching, and Claude's own
 artifacts do exactly that today. Two pieces of evidence argue against it for a

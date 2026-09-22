@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator
 
 import pytest
@@ -54,10 +55,23 @@ DIRECTION = {
     "reference": "1950s club bills",
 }
 
-POSTER = (
-    "<!DOCTYPE html><html><head><style>:root{--ground:#12151C}</style></head>"
-    "<body><div class='canvas'>Jazz</div></body></html>"
-)
+def poster_html(width: int = 1080, height: int = 1350) -> str:
+    """A document that passes every check, at whatever size it was asked for.
+
+    The fake provider behaves like a model that followed its instructions, so
+    these tests exercise the pipeline. `test_artifact_validation.py` does the
+    opposite and feeds it documents that do not.
+    """
+    return (
+        "<!DOCTYPE html><html><head><style>"
+        ":root{--ground:#12151C}"
+        f".canvas{{width:{width}px;height:{height}px;background:var(--ground)}}"
+        "</style></head>"
+        '<body><div class="canvas"><h1>Jazz</h1></div></body></html>'
+    )
+
+
+POSTER = poster_html()
 
 
 class FakeArtifactProvider:
@@ -72,7 +86,8 @@ class FakeArtifactProvider:
         fail_decide: str | None = None,
     ) -> None:
         self._direction = direction
-        self._documents = documents if documents is not None else [POSTER, POSTER]
+        self._documents = documents
+        self._size = (1080, 1350)
         self._fail_stream = fail_stream
         self._fail_decide = fail_decide
         self.prompts: list[str] = []
@@ -99,7 +114,14 @@ class FakeArtifactProvider:
         self.prompts.append(req.messages[0].content)
         if self._fail_stream:
             raise ProviderError(self._fail_stream)
-        document = self._documents.pop(0) if self._documents else ""
+
+        asked = re.search(r"exactly (\d+)px by (\d+)px", req.messages[0].content)
+        if asked:
+            self._size = (int(asked.group(1)), int(asked.group(2)))
+        if self._documents is None:
+            document = poster_html(*self._size)
+        else:
+            document = self._documents.pop(0) if self._documents else ""
         for piece in (document[: len(document) // 2], document[len(document) // 2 :]):
             if piece:
                 yield TokenEvent(text=piece)
@@ -134,7 +156,13 @@ async def test_a_poster_is_directed_then_composed_then_refined() -> None:
     updates = await build(poster_for(provider))
 
     steps = [u.label for u in updates if isinstance(u, Step)]
-    assert steps == ["Reading the brief", "Chose a direction", "Composing", "Refining"]
+    assert steps == [
+        "Reading the brief",
+        "Chose a direction",
+        "Composing",
+        "Checking it fits",
+        "Refining",
+    ]
     assert isinstance(updates[-1], Finished)
 
 
@@ -194,6 +222,7 @@ async def test_refinement_can_be_switched_off() -> None:
         "Reading the brief",
         "Chose a direction",
         "Composing",
+        "Checking it fits",
     ]
     assert updates[-1].built.completion_tokens == 900
 
@@ -219,7 +248,8 @@ async def test_a_direction_that_is_not_json_still_produces_a_poster() -> None:
     built = updates[-1].built
     assert built.spec.movement == "Quiet Confidence"
     assert built.spec.palette
-    assert built.html == POSTER
+    # A4, because nothing said otherwise.
+    assert built.html == poster_html(794, 1123)
 
 
 async def test_the_model_picks_its_own_faces() -> None:
