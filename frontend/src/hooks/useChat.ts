@@ -118,6 +118,42 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     () => streamingForRef.current === null || streamingForRef.current === onScreenRef.current,
     [],
   )
+
+  // The answer being streamed, kept per conversation.
+  //
+  // `load()` replaces the transcript with what the server has, and the server
+  // has nothing until the turn ends — a half-written answer and its build are
+  // client state and nowhere else. Leaving mid-build therefore erased them,
+  // and suppressing the stream's writes while away meant everything that
+  // arrived in the meantime was lost too: coming back found the question and
+  // no answer.
+  //
+  // So the in-flight answer is buffered here regardless of what is on screen,
+  // and put back when the person returns to it.
+  const parked = useRef<Map<string, ChatMessage>>(new Map())
+
+  /** Change the answer being streamed. The only way the stream touches it. */
+  const answer = useCallback(
+    (change: (message: ChatMessage) => ChatMessage) => {
+      const id = assistantIdRef.current
+      if (!id) return
+      const forConversation = streamingForRef.current
+      if (forConversation) {
+        const held = parked.current.get(forConversation)
+        if (held?.id === id) parked.current.set(forConversation, change(held))
+      }
+      if (!showing()) return
+      setMessages((current) =>
+        current.map((m) => {
+          if (m.id !== id) return m
+          const next = change(m)
+          if (forConversation) parked.current.set(forConversation, next)
+          return next
+        }),
+      )
+    },
+    [showing],
+  )
   // Guards and tools report before the answer exists, so they queue until there
   // is a message to attach them to.
   const pendingToolsRef = useRef<ToolActivity[]>([])
@@ -132,11 +168,8 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   )
 
   const patchActive = useCallback(
-    (changes: Partial<ChatMessage>) => {
-      const id = assistantIdRef.current
-      if (id) patch(id, changes)
-    },
-    [patch],
+    (changes: Partial<ChatMessage>) => answer((m) => ({ ...m, ...changes })),
+    [answer],
   )
 
   /** Change the build on the answer being written. Separate from `patchActive`
@@ -145,15 +178,9 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
    *  arrived between the read and the write. */
   const patchBuild = useCallback(
     (change: (build: ArtifactBuild) => ArtifactBuild) => {
-      const id = assistantIdRef.current
-      if (!id || !showing()) return
-      setMessages((current) =>
-        current.map((m) =>
-          m.id === id && m.building ? { ...m, building: change(m.building) } : m,
-        ),
-      )
+      answer((m) => (m.building ? { ...m, building: change(m.building) } : m))
     },
-    [showing],
+    [answer],
   )
 
   const reset = useCallback(() => {
@@ -162,6 +189,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     assistantIdRef.current = null
     streamingForRef.current = null
     onScreenRef.current = null
+    parked.current.clear()
     setMessages([])
     setOpenArtifact(null)
     setConversationId(null)
@@ -184,7 +212,11 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setTitle(detail.title)
     // Images and citations are stored in one table but render as very different
     // things, so a reloaded conversation has to be split back apart.
-    setMessages(detail.messages.map(splitStoredSources))
+    const stored = detail.messages.map(splitStoredSources)
+    const live = parked.current.get(id)
+    setMessages(
+      live ? [...stored.filter((m) => m.id !== live.id), live] : stored,
+    )
     setRatings(
       Object.fromEntries(
         Object.entries(detail.feedback ?? {}).map(([key, f]) => [key, f.rating]),
@@ -250,6 +282,39 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     [patch],
   )
 
+  /**
+   * Whether the turn finished anyway, after the connection to it was lost.
+   *
+   * Given a little time — the server may still have been writing when the
+   * connection went — the conversation is fetched again. An answer with
+   * something in it means the work survived, and it is shown as though
+   * nothing happened.
+   */
+  const finished = useCallback(
+    async (conversation: string | null): Promise<boolean> => {
+      const id = assistantIdRef.current
+      if (!conversation || !id) return false
+      for (const wait of [1200, 3000, 6000]) {
+        await new Promise((go) => setTimeout(go, wait))
+        try {
+          const detail = await apiFetch<ConversationDetail>(`/conversations/${conversation}`)
+          const answered = detail.messages.find((m) => m.id === id)
+          if (!answered?.content && !(answered?.artifacts ?? []).length) continue
+          parked.current.delete(conversation)
+          if (onScreenRef.current === conversation) {
+            setMessages(detail.messages.map(splitStoredSources))
+            setTotals(detail.totals)
+          }
+          return true
+        } catch {
+          // Still unreachable. Try again, then give up and say so.
+        }
+      }
+      return false
+    },
+    [],
+  )
+
   /** The stream loop, shared by sending and regenerating. */
   const run = useCallback(
     async (body: StreamBody, onStart: (start: StartPayload) => void) => {
@@ -286,6 +351,12 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
                 streamingForRef.current = start.conversation_id
                 onScreenRef.current = start.conversation_id
               }
+              // Registered before anything is written to it, so leaving at any
+              // point after this finds something to come back to.
+              parked.current.set(start.conversation_id, {
+                ...newMessage(start.assistant_message_id, 'assistant', ''),
+                streaming: true,
+              })
               setConversationId(start.conversation_id)
               setTitle(start.title)
               setLanguage(start.language)
@@ -299,12 +370,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
                 pendingGuardsRef.current = [...pendingGuardsRef.current, alert]
                 return
               }
-              if (!showing()) return
-              setMessages((current) =>
-                current.map((m) =>
-                  m.id === id ? { ...m, guards: [...(m.guards ?? []), alert] } : m,
-                ),
-              )
+              answer((m) => ({ ...m, guards: [...(m.guards ?? []), alert] }))
             },
             onTool: (activity) => {
               const id = assistantIdRef.current
@@ -312,29 +378,14 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
                 pendingToolsRef.current = mergeTool(pendingToolsRef.current, activity)
                 return
               }
-              if (!showing()) return
-              setMessages((current) =>
-                current.map((m) =>
-                  m.id === id ? { ...m, tools: mergeTool(m.tools, activity) } : m,
-                ),
-              )
+              answer((m) => ({ ...m, tools: mergeTool(m.tools, activity) }))
             },
             onImages: (images) => patchActive({ images }),
             onSources: (sources) => {
-              const id = assistantIdRef.current
-              if (!id || !showing()) return
-              setMessages((current) =>
-                current.map((m) =>
-                  m.id === id ? { ...m, sources: mergeSources(m.sources, sources) } : m,
-                ),
-              )
+              answer((m) => ({ ...m, sources: mergeSources(m.sources, sources) }))
             },
             onToken: (text) => {
-              const id = assistantIdRef.current
-              if (!id || !showing()) return
-              setMessages((current) =>
-                current.map((m) => (m.id === id ? { ...m, content: m.content + text } : m)),
-              )
+              answer((m) => ({ ...m, content: m.content + text }))
             },
             onUsage: (usage) => {
               patchActive({
@@ -376,16 +427,11 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               patchBuild((build) => ({ ...build, parts: mergePart(build.parts, part) }))
             },
             onArtifactDone: (artifact) => {
-              const id = assistantIdRef.current
-              if (id && showing()) {
-                setMessages((current) =>
-                  current.map((m) =>
-                    m.id === id
-                      ? { ...m, building: null, artifacts: [...(m.artifacts ?? []), artifact] }
-                      : m,
-                  ),
-                )
-              }
+              answer((m) => ({
+                ...m,
+                building: null,
+                artifacts: [...(m.artifacts ?? []), artifact],
+              }))
               // Opened as soon as it exists, and bumped either way: an edit
               // keeps the same id, so this is what tells the panel to look
               // again.
@@ -414,17 +460,27 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
       } catch (err) {
         // An abort is the stop button working, not a failure.
         if (!(err instanceof DOMException && err.name === 'AbortError')) {
-          setError(err instanceof Error ? err.message : 'Could not reach the server.')
+          // The connection going away does not mean the turn did. A build runs
+          // for minutes, and a browser will suspend a connection that old on a
+          // backgrounded tab — `ERR_NETWORK_IO_SUSPENDED` — while the server
+          // carries on and stores the result. Reported as an error, that is a
+          // scary message in front of work that actually succeeded, which a
+          // refresh then reveals. So ask the server before saying anything.
+          const recovered = await finished(streamingForRef.current)
+          if (!recovered) {
+            setError(err instanceof Error ? err.message : 'Could not reach the server.')
+          }
         }
         patchActive({ streaming: false })
       } finally {
         if (showing()) setStreaming(false)
+        if (streamingForRef.current) parked.current.delete(streamingForRef.current)
         streamingForRef.current = null
         abortRef.current = null
         assistantIdRef.current = null
       }
     },
-    [onConversationStarted, patch, patchActive, flushPending, showing],
+    [onConversationStarted, patch, patchActive, flushPending, showing, answer, finished],
   )
 
   const send = useCallback(

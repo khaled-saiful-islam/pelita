@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 import { readableOn } from '@/lib/contrast'
 import { Forming } from '@/components/artifacts/Forming'
+import { arrivesInPieces } from '@/components/artifacts/arrives-in-pieces'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
 /**
@@ -26,16 +27,11 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
   const made = new Map(build.parts.map((part) => [part.index, part]))
   const total = planned.length || build.parts.length
   const design = build.design
-  // The card is a poster's only preview: it has no pieces to show as they
-  // land, so its palette is the one thing there is to look at while it works.
-  // A deck already shows real slides, and for a game the swatches say nothing
-  // the step above has not — its loop is named there, in a sentence. The
-  // colours are still read from the design either way, because the progress
-  // bar belongs to the thing being made.
-  // Until there are real pieces to show. A deck replaces it with its own
+  // Until there are real pieces to show. A deck replaces the card with its own
   // slides as they land; a poster and a game keep it to the end, because
   // neither has anything to show before it is finished.
   const showLook = made.size === 0
+  const piecemeal = arrivesInPieces(build)
   const ground = design?.palette?.[0] ?? '#ffffff'
   // Picked by contrast, not by position: a palette is a list, not named roles,
   // and a deck whose first two colours were both cream put cream on cream.
@@ -70,7 +66,24 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
           the artifact, not a picture of it. */}
       {showLook && <Forming build={build} />}
 
-      {total > 0 && (
+      {planned.length > 0 && !piecemeal && (
+        <div className="flex flex-wrap gap-1.5" aria-label="What it will contain">
+          {planned.map((name, index) => (
+            <span
+              key={`${name}-${index}`}
+              className="rounded-full border px-2.5 py-1 text-[11px]"
+              style={{
+                borderColor: `${accent ?? 'currentColor'}44`,
+                color: accent ?? undefined,
+              }}
+            >
+              {name}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {total > 0 && piecemeal && (
         <>
           <div className="flex items-center gap-3">
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
