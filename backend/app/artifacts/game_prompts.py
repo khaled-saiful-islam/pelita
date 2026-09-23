@@ -90,6 +90,10 @@ explanation, no code fence.
 - **Playable within two seconds of loading.** A start screen is fine; a start
   screen with instructions nobody reads is not. Put the controls on screen,
   small, and leave them there.
+- **Every button must also answer a key.** A start screen that only begins on
+  a click strands anyone playing from the keyboard, who has their hands on the
+  arrows already. `Enter` and `Space` start, continue and retry wherever a
+  button would.
 - **Keyboard and touch.** Arrow keys or WASD, and on-screen buttons or swipe
   that do the same thing. A game that needs a keyboard is a game half the
   people who open it cannot play. Call `preventDefault()` on the arrow keys and

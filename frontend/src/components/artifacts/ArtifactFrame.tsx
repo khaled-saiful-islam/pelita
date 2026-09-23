@@ -31,7 +31,23 @@ export function ArtifactFrame({
   title: string
 }) {
   const box = useRef<HTMLDivElement>(null)
+  const frame = useRef<HTMLIFrameElement>(null)
   const [scale, setScale] = useState(0)
+
+  // A game only receives the arrow keys once its frame has focus, and an
+  // iframe does not take focus by being visible. Without this the game is on
+  // screen, drawn correctly and completely unresponsive: every key goes to the
+  // page behind it. That reads, fairly, as the game being broken.
+  //
+  // Only for a kind that runs scripts. Taking focus for a poster would move it
+  // off the message box for no reason.
+  const playable = sandbox.includes('allow-scripts')
+  useEffect(() => {
+    if (!playable || scale <= 0) return
+    // After the frame has laid out and loaded its document.
+    const at = window.setTimeout(() => frame.current?.focus(), 150)
+    return () => window.clearTimeout(at)
+  }, [playable, scale, html])
 
   // A poster is whatever shape it decided to be — A4, a square, a wide banner —
   // and the panel is whatever width the window allows. Neither knows about the
@@ -77,8 +93,12 @@ export function ArtifactFrame({
         className="shrink-0 overflow-hidden rounded-md shadow-lg ring-1 ring-border"
       >
         <iframe
+          ref={frame}
           title={title}
           srcDoc={html}
+          // So a click anywhere in the game, or a tab to it, hands it the keys
+          // back after focus has been somewhere else.
+          onMouseEnter={playable ? () => frame.current?.focus() : undefined}
           sandbox={sandbox}
           referrerPolicy="no-referrer"
           style={{
