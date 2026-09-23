@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -115,6 +116,19 @@ class Playtest:
                 f"({self.reached_network[0]}). Everything it needs must be in the file."
             )
         return found
+
+
+# The one exception the prompt makes to "everything is in the file": the two
+# faces the design chose, which the game is explicitly told to link.
+_FONTS = re.compile(r"^https://fonts\.(googleapis|gstatic)\.com/")
+# Chromium's wording for a request that was refused, which is this module's
+# doing and never the game's.
+# `Failed to fetch` is the same event seen from the other side: a request this
+# module aborted, surfacing as a rejected promise rather than a console line.
+_REFUSED = re.compile(
+    r"net::ERR_FAILED|Failed to load resource|Failed to fetch|NetworkError",
+    re.IGNORECASE,
+)
 
 
 _PROBE = """() => {
@@ -229,16 +243,47 @@ async def _run(context: Any, html: str, width: int, height: int) -> Playtest:
 
     errors: list[str] = []
     blocked: list[str] = []
-    page.on("pageerror", lambda exc: errors.append(str(exc)[:300]))
-    page.on(
-        "console",
-        lambda message: errors.append(message.text[:300]) if message.type == "error" else None,
-    )
+    def thrown(exc: Any) -> None:
+        # Same rule as the console: a request this playtest refused is not an
+        # error the game made. What it did wrong -- reaching the network at
+        # all -- is reported once, as itself.
+        text = str(exc)
+        if _REFUSED.search(text):
+            return
+        errors.append(text[:300])
+
+    page.on("pageerror", thrown)
+
+    def console(message: Any) -> None:
+        if message.type != "error":
+            return
+        # A request this playtest refused is not the game's fault. Chromium
+        # logs `net::ERR_FAILED` for every blocked resource, and counting those
+        # as errors sent a perfectly good game back to be "fixed" -- every
+        # single time, because the prompt asks for a font `<link>` and this
+        # used to abort it. The game reaching the network is still reported,
+        # once, through `reached_network`.
+        if _REFUSED.search(message.text):
+            return
+        errors.append(message.text[:300])
+
+    page.on("console", console)
 
     async def refuse(route: Any) -> None:
-        # The document is self-contained by contract. Anything it asks for is
-        # either a mistake or a game phoning home, and both are worth knowing.
+        """Everything the document asks for, except the faces it was told to
+        use.
+
+        It is self-contained by contract, so anything else it wants is either
+        a mistake or a game phoning home, and both are worth knowing. Its type
+        is another matter: the prompt names Google Fonts as the one exception,
+        and a playtest that blocks what the prompt asks for is testing a
+        different game from the one that will be shipped -- one rendered
+        entirely in the fallback face.
+        """
         url = route.request.url
+        if _FONTS.match(url):
+            await route.continue_()
+            return
         if not url.startswith("data:") and not url.startswith("about:"):
             blocked.append(url[:120])
         await route.abort()

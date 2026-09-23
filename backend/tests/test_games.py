@@ -371,3 +371,29 @@ def test_the_probe_is_bounded_from_outside_not_by_an_argument() -> None:
     assert "page.evaluate(_PROBE)" in body
     assert "evaluate(_PROBE, timeout" not in body
     assert body.count("asyncio.wait_for(page.evaluate(_PROBE)") == 2
+
+
+# --- noise the playtest makes itself --------------------------------------
+
+
+def test_a_refused_request_is_not_the_games_fault() -> None:
+    """Chromium logs `net::ERR_FAILED` for every resource this playtest
+    blocks. Counted as errors, they sent a working game back to be "fixed" —
+    every single time, because the prompt asks for a font link."""
+    from app.artifacts.playtest import _REFUSED
+
+    assert _REFUSED.search("Failed to load resource: net::ERR_FAILED")
+    assert _REFUSED.search("net::ERR_FAILED")
+    assert not _REFUSED.search("ReferenceError: draw is not defined")
+    assert not _REFUSED.search("Uncaught TypeError: cannot read 'x' of undefined")
+
+
+def test_the_faces_the_prompt_asks_for_are_let_through() -> None:
+    """Blocking them tests a different game from the one that ships: the same
+    game rendered entirely in the fallback face."""
+    from app.artifacts.playtest import _FONTS
+
+    assert _FONTS.match("https://fonts.googleapis.com/css2?family=Orbitron")
+    assert _FONTS.match("https://fonts.gstatic.com/s/orbitron/v31/font.woff2")
+    assert not _FONTS.match("https://example.test/score")
+    assert not _FONTS.match("https://fonts.googleapis.com.evil.test/x")
