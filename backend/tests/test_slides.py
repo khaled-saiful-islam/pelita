@@ -52,9 +52,50 @@ def test_no_number_means_five() -> None:
     assert wanted_slides(brief("a deck about kopi")) == DEFAULT_SLIDES
 
 
-@pytest.mark.parametrize(("asked", "given"), [(1, MIN_SLIDES), (99, MAX_SLIDES)])
-def test_a_silly_number_is_brought_back_into_range(asked: int, given: int) -> None:
-    assert wanted_slides(brief("x", count=asked)) == given
+def test_too_many_is_brought_back_into_range() -> None:
+    assert wanted_slides(brief("x", count=99)) == MAX_SLIDES
+
+
+@pytest.mark.parametrize("asked", [1, 2])
+def test_a_count_below_the_minimum_is_a_misreading_not_a_request(asked: int) -> None:
+    """Clamping up to the minimum turned a misreading into a wrong answer:
+    "create a slide about EV cars" was read as one slide and came back as a
+    three-slide deck with no opening. Nobody asks for a deck of one."""
+    assert wanted_slides(brief("x", count=asked)) == DEFAULT_SLIDES
+    assert MIN_SLIDES == 3  # the value that used to be returned here
+
+
+def test_a_talk_opens_and_closes_however_the_outline_came_back() -> None:
+    """The outline prompt says title first and closing last, always, and a
+    deck came back opening on a `data` slide. A rule nothing checks holds
+    right up until the model is short of room."""
+    from app.artifacts.slides import Slide, _bookended
+
+    made = _bookended([
+        Slide(heading="Charging", layout="data", job="", content=""),
+        Slide(heading="Costs", layout="points", job="", content=""),
+        Slide(heading="Uptake", layout="split", job="", content=""),
+    ])
+
+    assert [s.layout for s in made] == ["title", "points", "closing"]
+
+
+def test_a_deck_that_already_opens_properly_is_left_alone() -> None:
+    from app.artifacts.slides import Slide, _bookended
+
+    proper = [
+        Slide(heading="A", layout="title", job="", content=""),
+        Slide(heading="B", layout="points", job="", content=""),
+        Slide(heading="C", layout="closing", job="", content=""),
+    ]
+    assert [s.layout for s in _bookended(list(proper))] == ["title", "points", "closing"]
+
+
+def test_a_single_slide_is_an_opening_and_nothing_else() -> None:
+    from app.artifacts.slides import Slide, _bookended
+
+    made = _bookended([Slide(heading="A", layout="data", job="", content="")])
+    assert [s.layout for s in made] == ["title"]
 
 
 # --- assembling ---------------------------------------------------------

@@ -120,9 +120,12 @@ class CreateArtifactTool:
                 "count": {
                     "type": "integer",
                     "description": (
-                        "How many slides, when the person said a number - "
-                        "'eight slides', 'a 12 page deck'. Copy their number "
-                        "exactly. Leave it out entirely when they did not say."
+                        "How many pieces, when the person said a number - "
+                        "'eight slides', 'a 12 page deck', 'a game with 3 "
+                        "levels'. Copy their number exactly. Leave it out "
+                        "entirely when they did not say. \"A slide\", \"a "
+                        "deck\" and \"a game\" are not numbers - that is "
+                        "the word 'a', and it means they did not say."
                     ),
                 },
             },

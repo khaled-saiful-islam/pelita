@@ -108,11 +108,25 @@ def wanted_slides(brief: Brief) -> int:
     made ten.
     """
     if brief.count:
-        return max(MIN_SLIDES, min(MAX_SLIDES, brief.count))
+        return _sensible(brief.count)
     said = _COUNT.search(f"{brief.brief} {brief.title}")
     if not said:
         return DEFAULT_SLIDES
-    return max(MIN_SLIDES, min(MAX_SLIDES, int(said.group(1))))
+    return _sensible(int(said.group(1)))
+
+
+def _sensible(asked: int) -> int:
+    """A count, or the default when the count cannot have been meant.
+
+    Clamping a too-small number up to the minimum turned a misreading into a
+    wrong answer: "create a slide about EV cars" was read as one slide, and
+    came back as a three-slide deck with no opening. Nobody asks for a deck of
+    one, so below the minimum is a misread of "a slide deck" and the default
+    is the better answer.
+    """
+    if asked < MIN_SLIDES:
+        return DEFAULT_SLIDES
+    return min(MAX_SLIDES, asked)
 
 
 class SlidesKind:
@@ -360,7 +374,7 @@ class SlidesKind:
             for item in raw[:count]
             if isinstance(item, dict)
         ]
-        return answered, [slide for slide in slides if slide.heading]
+        return answered, _bookended([slide for slide in slides if slide.heading])
 
     async def _design(
         self, context: str, outline: dict, count: int
@@ -541,6 +555,26 @@ class SlidesKind:
 # The layouts whose slides are meant to land. They get the emphatic ground —
 # whichever one the design put first — and everything else shares the rest.
 _LANDS = frozenset({"title", "closing", "statement", "quote"})
+
+
+def _bookended(slides: list[Slide]) -> list[Slide]:
+    """A deck that opens like a talk and ends like one.
+
+    The outline prompt says title first and closing last, always, and a deck
+    asked for as "a slide" came back opening on a data slide — no title, no
+    close. A rule the prompt states and nothing checks is a rule that holds
+    right up until the model is short of room.
+
+    The layout is changed rather than a slide inserted: the first slide is
+    already about the subject, which is what a title slide says.
+    """
+    if not slides:
+        return slides
+    if slides[0].layout != "title":
+        slides[0] = replace(slides[0], layout="title")
+    if len(slides) > 1 and slides[-1].layout != "closing":
+        slides[-1] = replace(slides[-1], layout="closing")
+    return slides
 
 
 def _grounds(layouts: Sequence[str], grounds: Sequence[str]) -> list[str]:

@@ -53,6 +53,15 @@
   --hover-border: var(--accent-400);
   --selected: 45 92% 88%;
 
+  /* --- What kind of artifact ---------------------------------------------
+     One colour each, so a poster, a deck and a game are told apart at a
+     glance in a transcript that may hold all three. Deliberately off the
+     accent ramp: these are categories, not emphasis, and three tints of the
+     brand would read as three states of one thing. */
+  --kind-poster: 350 68% 48%;
+  --kind-slides: 199 80% 38%;
+  --kind-games: 264 60% 55%;
+
   --primary: var(--accent-500);
   --primary-foreground: 26 65% 13%;
 
@@ -114,6 +123,10 @@
     --hover-border: var(--accent-500);
     --selected: 35 34% 22%;
 
+    --kind-poster: 350 80% 68%;
+    --kind-slides: 199 82% 62%;
+    --kind-games: 264 82% 75%;
+
     --primary: var(--accent-400);
     --primary-foreground: 26 70% 10%;
 
@@ -155,6 +168,10 @@
   --hover-border: var(--accent-500);
   --selected: 35 34% 22%;
 
+  --kind-poster: 350 80% 68%;
+  --kind-slides: 199 82% 62%;
+  --kind-games: 264 82% 75%;
+
   --primary: var(--accent-400);
   --primary-foreground: 26 70% 10%;
 
@@ -193,6 +210,9 @@
   --color-hover: hsl(var(--hover));
   --color-hover-border: hsl(var(--hover-border));
   --color-selected: hsl(var(--selected));
+  --color-kind-poster: hsl(var(--kind-poster));
+  --color-kind-slides: hsl(var(--kind-slides));
+  --color-kind-games: hsl(var(--kind-games));
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-secondary: hsl(var(--secondary));

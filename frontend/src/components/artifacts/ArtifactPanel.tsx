@@ -19,6 +19,7 @@ import { ArtifactFrame } from '@/components/artifacts/ArtifactFrame'
 import { DeckFrame } from '@/components/artifacts/DeckFrame'
 import { DeckFilmstrip } from '@/components/artifacts/DeckFilmstrip'
 import { ArtifactBuilding } from '@/components/artifacts/ArtifactBuilding'
+import { lookOf } from '@/components/artifacts/kind-look'
 import { EditableFrame } from '@/components/artifacts/EditableFrame'
 import { ShareArtifactDialog } from '@/components/artifacts/ShareArtifactDialog'
 import { useArtifact } from '@/hooks/useArtifact'
@@ -60,6 +61,8 @@ export function ArtifactPanel({
   const [changes, setChanges] = useState<Map<number, string>>(new Map())
 
   const building = !artifactId && !!build
+  const headLook = lookOf(artifact?.kind ?? build?.kind)
+  const HeadGlyph = headLook.icon
   const title = artifact?.title ?? build?.title ?? 'Artifact'
 
   const deck = !!artifact && isDeck(artifact.kind, artifact.html)
@@ -121,8 +124,13 @@ export function ArtifactPanel({
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-surface">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-2 sm:px-3">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
-          <ImageIcon className="size-3.5 text-muted-foreground" aria-hidden />
+        <span
+          className={cn(
+            'flex size-7 shrink-0 items-center justify-center rounded-md',
+            headLook.tile,
+          )}
+        >
+          <HeadGlyph className="size-3.5" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-medium leading-tight">{title}</h2>

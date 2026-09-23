@@ -85,21 +85,6 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
 
       {total > 0 && piecemeal && (
         <>
-          <div className="flex items-center gap-3">
-            <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full transition-[width] duration-500 ease-out"
-                style={{
-                  width: `${(made.size / total) * 100}%`,
-                  background: accent ?? 'hsl(var(--primary))',
-                }}
-              />
-            </div>
-            <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-              {made.size} / {total}
-            </span>
-          </div>
-
           {made.size < total && (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-3 shrink-0 animate-spin text-primary" aria-hidden />
