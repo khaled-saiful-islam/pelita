@@ -102,14 +102,34 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
 
   const abortRef = useRef<AbortController | null>(null)
   const assistantIdRef = useRef<string | null>(null)
+  // Which conversation is on screen, and which one the running stream belongs
+  // to. A build takes minutes; leaving to read something else used to abort it,
+  // and because an artifact is only stored once it is finished, coming back
+  // found nothing — no panel, no card, and the work thrown away. The stream now
+  // outlives the switch, and its writes are scoped so they cannot land in
+  // whichever conversation happens to be on screen.
+  const onScreenRef = useRef<string | null>(null)
+  const streamingForRef = useRef<string | null>(null)
+
+  /** Whether the running stream is still writing to what the person is
+   *  looking at. A background build keeps going; it just stops touching the
+   *  screen. */
+  const showing = useCallback(
+    () => streamingForRef.current === null || streamingForRef.current === onScreenRef.current,
+    [],
+  )
   // Guards and tools report before the answer exists, so they queue until there
   // is a message to attach them to.
   const pendingToolsRef = useRef<ToolActivity[]>([])
   const pendingGuardsRef = useRef<GuardAlert[]>([])
 
-  const patch = useCallback((id: string, changes: Partial<ChatMessage>) => {
-    setMessages((current) => current.map((m) => (m.id === id ? { ...m, ...changes } : m)))
-  }, [])
+  const patch = useCallback(
+    (id: string, changes: Partial<ChatMessage>) => {
+      if (!showing()) return
+      setMessages((current) => current.map((m) => (m.id === id ? { ...m, ...changes } : m)))
+    },
+    [showing],
+  )
 
   const patchActive = useCallback(
     (changes: Partial<ChatMessage>) => {
@@ -126,20 +146,22 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   const patchBuild = useCallback(
     (change: (build: ArtifactBuild) => ArtifactBuild) => {
       const id = assistantIdRef.current
-      if (!id) return
+      if (!id || !showing()) return
       setMessages((current) =>
         current.map((m) =>
           m.id === id && m.building ? { ...m, building: change(m.building) } : m,
         ),
       )
     },
-    [],
+    [showing],
   )
 
   const reset = useCallback(() => {
     abortRef.current?.abort()
     abortRef.current = null
     assistantIdRef.current = null
+    streamingForRef.current = null
+    onScreenRef.current = null
     setMessages([])
     setOpenArtifact(null)
     setConversationId(null)
@@ -153,8 +175,10 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
   }, [])
 
   const load = useCallback(async (id: string) => {
-    abortRef.current?.abort()
+    // Deliberately does not abort. A build in another conversation keeps
+    // running so it finishes and is stored; coming back finds it there.
     setError(null)
+    onScreenRef.current = id
     const detail = await apiFetch<ConversationDetail>(`/conversations/${id}`)
     setConversationId(detail.id)
     setTitle(detail.title)
@@ -170,7 +194,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setTotals(detail.totals)
     // Chips are per-turn and not persisted.
     setSuggestions([])
-    setStreaming(false)
+    setStreaming(streamingForRef.current === id)
     setOpenArtifact(null)
 
     // Artifacts live in their own table, so a reload has to put the cards back.
@@ -237,6 +261,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
 
       const controller = new AbortController()
       abortRef.current = controller
+      streamingForRef.current = onScreenRef.current
 
       try {
         const response = await fetch('/api/chat/stream', {
@@ -254,6 +279,13 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
           dispatchFrame(frame, {
             onStart: (start) => {
               assistantIdRef.current = start.assistant_message_id
+              // A new chat has no id until now, so both refs learn it here —
+              // otherwise the first turn of a brand-new conversation would be
+              // treated as belonging to nothing and stop drawing.
+              if (streamingForRef.current === null) {
+                streamingForRef.current = start.conversation_id
+                onScreenRef.current = start.conversation_id
+              }
               setConversationId(start.conversation_id)
               setTitle(start.title)
               setLanguage(start.language)
@@ -267,6 +299,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
                 pendingGuardsRef.current = [...pendingGuardsRef.current, alert]
                 return
               }
+              if (!showing()) return
               setMessages((current) =>
                 current.map((m) =>
                   m.id === id ? { ...m, guards: [...(m.guards ?? []), alert] } : m,
@@ -279,6 +312,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
                 pendingToolsRef.current = mergeTool(pendingToolsRef.current, activity)
                 return
               }
+              if (!showing()) return
               setMessages((current) =>
                 current.map((m) =>
                   m.id === id ? { ...m, tools: mergeTool(m.tools, activity) } : m,
@@ -288,7 +322,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
             onImages: (images) => patchActive({ images }),
             onSources: (sources) => {
               const id = assistantIdRef.current
-              if (!id) return
+              if (!id || !showing()) return
               setMessages((current) =>
                 current.map((m) =>
                   m.id === id ? { ...m, sources: mergeSources(m.sources, sources) } : m,
@@ -297,7 +331,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
             },
             onToken: (text) => {
               const id = assistantIdRef.current
-              if (!id) return
+              if (!id || !showing()) return
               setMessages((current) =>
                 current.map((m) => (m.id === id ? { ...m, content: m.content + text } : m)),
               )
@@ -311,10 +345,10 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               })
               // Rolled in rather than refetched: the server already said what
               // this turn cost.
-              setTotals((current) => addUsage(current, usage))
+              if (showing()) setTotals((current) => addUsage(current, usage))
             },
             onArtifactStart: (start) => {
-              setOpenArtifact(null)
+              if (showing()) setOpenArtifact(null)
               patchActive({
                 building: { ...start, steps: [], source: '', parts: [], failed: null },
               })
@@ -336,7 +370,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
             },
             onArtifactDone: (artifact) => {
               const id = assistantIdRef.current
-              if (id) {
+              if (id && showing()) {
                 setMessages((current) =>
                   current.map((m) =>
                     m.id === id
@@ -348,13 +382,20 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               // Opened as soon as it exists, and bumped either way: an edit
               // keeps the same id, so this is what tells the panel to look
               // again.
-              setOpenArtifact(artifact.id)
-              setArtifactRevision((n) => n + 1)
+              // Only opened for somebody who is here to see it. A build that
+              // finished while they were reading something else is waiting in
+              // its own conversation, not thrown at the one they are in.
+              if (showing()) {
+                setOpenArtifact(artifact.id)
+                setArtifactRevision((n) => n + 1)
+              }
             },
             onArtifactFailed: (failure) => {
               patchBuild((build) => ({ ...build, failed: failure.message }))
             },
-            onSuggestions: setSuggestions,
+            onSuggestions: (chips: string[]) => {
+              if (showing()) setSuggestions(chips)
+            },
             onError: (message) => {
               setError(message)
               patchActive({ error: message })
@@ -370,12 +411,13 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         }
         patchActive({ streaming: false })
       } finally {
-        setStreaming(false)
+        if (showing()) setStreaming(false)
+        streamingForRef.current = null
         abortRef.current = null
         assistantIdRef.current = null
       }
     },
-    [onConversationStarted, patch, patchActive, flushPending],
+    [onConversationStarted, patch, patchActive, flushPending, showing],
   )
 
   const send = useCallback(
