@@ -25,7 +25,7 @@ you   Design a wide banner for a badminton tournament at Dewan
 
 ![A game, played to a game over, from a one-line brief](../images/pelita-game.png)
 
-![The build in progress: steps, timings and the palette it chose](../images/pelita-building.png)
+![The build in progress: the artifact forming in its own ground and face](../images/pelita-building.png)
 
 An artifact is **one self-contained HTML document**. That is the whole format,
 and it is why this feature adds no service, no build step and no dependency. A
@@ -130,6 +130,42 @@ it belongs. All three make a new version; correcting a word with the pencil
 still does not.
 
 **Downloading** a deck gives a PDF, one slide to a page.
+
+### What the panel shows while it works
+
+Three things, in the artifact's own colours: the steps with their timings,
+the artifact forming, and — for a deck — the slides themselves as they land.
+
+The forming card is the thing before it exists. Its proportions are the ones
+it chose, its ground is the first colour of its palette, its title is set in
+the display face it named (fetched from Google Fonts the moment it is
+named), and under that is the one sentence explaining why it looks like this
+— for a game, the loop: what the player will actually be doing. Light moves
+across it, because something is happening.
+
+Nothing there is invented. Every value is one the artifact has already
+committed to, which is the point: what is on screen while you wait is the
+first true thing about what you are going to get.
+
+It replaced a row of colour swatches, which told you a palette had been
+chosen and nothing whatever about what was being made — and was shown for
+every kind, including a game, where five colours say less than the sentence
+above them.
+
+### Each kind has a colour
+
+A poster is rose, a deck is blue, a game is violet, each with its own mark —
+a picture, a presentation, a gamepad. The card in the transcript is washed
+and bordered in its colour, the tile behind its glyph is that colour solid,
+and the panel header matches. Three artifacts in one conversation are told
+apart before they are read.
+
+The colours are tokens in `theme.css` with dark values, deliberately off the
+accent ramp: they are categories, not emphasis, and three tints of the brand
+would read as three states of one thing. The classes are written out rather
+than built from the kind's name, because Tailwind reads them out of the
+source — `bg-kind-${kind}` compiles to nothing. A kind with no entry gets the
+brand colour and a neutral mark.
 
 ### Games, and the one kind that executes
 
@@ -358,9 +394,12 @@ documented failure of every implementation that has tried it.
 - **Print fidelity is the browser's.** No bleed, no crop marks, no CMYK. A
   document that prints well, not a press-ready file.
 - **A poster's preview is not progressive.** The first look at it is the
-  finished one. While it builds, the panel shows the steps, their timings and
-  the palette the design settled on — never the markup being written, which
-  is not a preview of anything. A deck does show its slides as they land.
+  finished one. While it builds, the panel shows the steps and the artifact
+  forming: its real proportions, its real ground, its title set in the face
+  it has just chosen and the sentence justifying it. Never the markup being
+  written, which is not a preview of anything, and never a row of colour
+  swatches, which says a palette was chosen and nothing about what is being
+  made. A deck replaces it with real slides as they land.
 - **The fit measurement lands a few seconds after the poster does.** It waits
   for fonts, so a poster that does not fit is shown before it is flagged.
 - **The design prompt is English-only**, in line with the other pattern layers.
