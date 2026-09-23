@@ -300,6 +300,13 @@ class Designed:
     palette: tuple[str, ...]
     display_font: str
     body_font: str
+    # One sentence on what is being made and why it looks like this. For a
+    # game it is the loop: what the player will actually be doing.
+    rationale: str = ""
+    # The shape it has decided on. A poster is a portrait, a deck is
+    # widescreen, and a square standing in for both says neither.
+    width: int = 0
+    height: int = 0
 
 
 @dataclass(frozen=True, slots=True)

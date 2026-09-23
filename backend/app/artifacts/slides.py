@@ -174,6 +174,9 @@ class SlidesKind:
             palette=tuple(swatch.hex for swatch in spec.palette),
             display_font=spec.display_font,
             body_font=spec.body_font,
+            rationale=spec.rationale,
+            width=self.canvas.width,
+            height=self.canvas.height,
         )
         yield Step(label="Chose a look", detail=_direction(spec))
 

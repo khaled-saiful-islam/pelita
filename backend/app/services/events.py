@@ -119,6 +119,9 @@ class ArtifactDesignEvent:
     palette: tuple[str, ...]
     display_font: str
     body_font: str
+    rationale: str = ""
+    width: int = 0
+    height: int = 0
 
 
 @dataclass(frozen=True, slots=True)

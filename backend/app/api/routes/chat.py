@@ -150,6 +150,9 @@ def _to_sse(event: object) -> dict[str, str] | None:
                         "palette": list(event.palette),
                         "display_font": event.display_font,
                         "body_font": event.body_font,
+                        "rationale": event.rationale,
+                        "width": event.width,
+                        "height": event.height,
                     }
                 ),
             }

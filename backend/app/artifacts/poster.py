@@ -137,6 +137,9 @@ class PosterKind:
             palette=tuple(swatch.hex for swatch in spec.palette),
             display_font=spec.display_font,
             body_font=spec.body_font,
+            rationale=spec.rationale,
+            width=spec.width,
+            height=spec.height,
         )
         yield Step(label="Chose a direction", detail=_direction_summary(spec))
 

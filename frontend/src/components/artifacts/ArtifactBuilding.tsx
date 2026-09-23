@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
 import { readableOn } from '@/lib/contrast'
+import { Forming } from '@/components/artifacts/Forming'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
 /**
  * An artifact being made.
  *
- * The look goes up first — it is decided a full minute before anything else
- * exists — and then, for a deck, every slide as it lands. A poster has no
- * pieces to show, so the look is all there is, and that is the whole of what
- * this shows for one: never the source. Watching markup scroll past is not a
- * preview of anything.
+ * A deck shows every slide as it lands. A poster has nothing to show until it
+ * is finished, so it gets its look instead — the palette and the two faces,
+ * decided a full minute before anything else exists. Never the source:
+ * watching markup scroll past is not a preview of anything.
  *
- * Shown in the artifact's own palette rather than in grey. A progress display
- * in somebody else's colours is a progress display for something else.
+ * A game gets neither. Its swatches say nothing about it, and the one line
+ * worth reading — what the player actually does — is already in the step
+ * above.
+ *
+ * What is shown is shown in the artifact's own palette rather than in grey. A
+ * progress display in somebody else's colours is a progress display for
+ * something else.
  */
 
 export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
@@ -21,6 +26,16 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
   const made = new Map(build.parts.map((part) => [part.index, part]))
   const total = planned.length || build.parts.length
   const design = build.design
+  // The card is a poster's only preview: it has no pieces to show as they
+  // land, so its palette is the one thing there is to look at while it works.
+  // A deck already shows real slides, and for a game the swatches say nothing
+  // the step above has not — its loop is named there, in a sentence. The
+  // colours are still read from the design either way, because the progress
+  // bar belongs to the thing being made.
+  // Until there are real pieces to show. A deck replaces it with its own
+  // slides as they land; a poster and a game keep it to the end, because
+  // neither has anything to show before it is finished.
+  const showLook = made.size === 0
   const ground = design?.palette?.[0] ?? '#ffffff'
   // Picked by contrast, not by position: a palette is a list, not named roles,
   // and a deck whose first two colours were both cream put cream on cream.
@@ -47,41 +62,13 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
     return () => observer.disconnect()
   }, [total])
 
-  if (!total && !design) return null
+  if (!total && !showLook) return null
 
   return (
     <div className="space-y-5">
-      {design && (
-        <div
-          className="rounded-lg border p-4"
-          style={{
-            // The deck's own ground and ink, so what is on screen already
-            // belongs to the thing being made.
-            background: ground,
-            borderColor: `${accent ?? ink ?? '#888'}33`,
-            color: ink,
-          }}
-        >
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-sm font-medium" style={{ fontFamily: design.display_font }}>
-              {design.movement}
-            </p>
-            <p className="shrink-0 text-[11px] opacity-70">
-              {design.display_font} · {design.body_font}
-            </p>
-          </div>
-          <div className="mt-3 flex gap-1.5">
-            {design.palette.slice(0, 7).map((colour) => (
-              <span
-                key={colour}
-                title={colour}
-                className="h-5 flex-1 rounded"
-                style={{ background: colour }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Never a row of swatches. That a palette was chosen is a fact about
+          the artifact, not a picture of it. */}
+      {showLook && <Forming build={build} />}
 
       {total > 0 && (
         <>

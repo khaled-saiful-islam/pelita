@@ -37,6 +37,9 @@ export interface StreamHandlers {
     palette: string[]
     display_font: string
     body_font: string
+    rationale?: string
+    width?: number
+    height?: number
   }) => void
   onArtifactDone: (artifact: Artifact & { findings: string[] }) => void
   onArtifactFailed: (failure: { message: string; retryable: boolean }) => void
@@ -85,6 +88,9 @@ export function dispatchFrame(frame: SseMessage, handlers: StreamHandlers): void
           palette: string[]
           display_font: string
           body_font: string
+          rationale?: string
+          width?: number
+          height?: number
         },
       )
     case 'artifact.part':

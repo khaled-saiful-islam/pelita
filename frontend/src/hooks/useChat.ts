@@ -363,7 +363,14 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
               patchBuild((build) => ({ ...build, plan: titles }))
             },
             onArtifactDesign: (design) => {
-              patchBuild((build) => ({ ...build, design }))
+              // The shape is kept beside the look rather than inside it: the
+              // panel asks for the artifact's proportions, not its palette.
+              patchBuild((build) => ({
+                ...build,
+                design,
+                width: design.width || build.width,
+                height: design.height || build.height,
+              }))
             },
             onArtifactPart: (part) => {
               patchBuild((build) => ({ ...build, parts: mergePart(build.parts, part) }))

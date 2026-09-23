@@ -94,7 +94,14 @@ export interface ArtifactBuild {
     palette: string[]
     display_font: string
     body_font: string
+    /** One sentence on what is being made. For a game, the loop: what the
+     *  player will actually be doing. */
+    rationale?: string
   }
+  /** The shape it will be, so the forming card is the artifact's proportions
+   *  rather than a rectangle picked by the panel. */
+  width?: number
+  height?: number
   failed?: string | null
 }
 

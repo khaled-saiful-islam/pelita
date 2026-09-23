@@ -163,6 +163,9 @@ class CreateArtifactTool:
                         palette=update.palette,
                         display_font=update.display_font,
                         body_font=update.body_font,
+                        rationale=update.rationale,
+                        width=update.width,
+                        height=update.height,
                     )
                 elif isinstance(update, Part):
                     yield Piece(

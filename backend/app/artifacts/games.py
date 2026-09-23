@@ -35,6 +35,7 @@ from app.artifacts.base import (
     Designed,
     DesignSpec,
     Finished,
+    Plan,
     SandboxPolicy,
     Step,
     Swatch,
@@ -134,8 +135,19 @@ class GamesKind:
             palette=tuple(swatch.hex for swatch in spec.palette),
             display_font=design.display_font,
             body_font=design.body_font,
+            rationale=design.loop,
+            width=self.canvas.width,
+            height=self.canvas.height,
         )
         yield Step(label="Designed it", detail=design.loop[:90])
+        # The levels by name, the way a deck announces its slides: the shape of
+        # what is coming, before any of it exists.
+        named = [
+            str(level.get("name") or f"Level {i + 1}")
+            for i, level in enumerate(design.levels)
+        ]
+        if named:
+            yield Plan(titles=tuple(named))
 
         written = Written()
         async for update in self._write(
@@ -148,7 +160,10 @@ class GamesKind:
         html = stage(html)
 
         findings = self._check(html)
-        html, findings, note = await self._make_it_run(html, findings)
+        outcome: dict = {}
+        async for update in self._make_it_run(html, findings, outcome):
+            yield update
+        html, findings, note = outcome["html"], outcome["findings"], outcome["note"]
 
         yield Step(label="Checking it fits")
         yield Finished(
@@ -195,7 +210,10 @@ class GamesKind:
             raise ArtifactUnavailable("That change came back empty. The game is as it was.")
 
         findings = self._check(updated)
-        updated, findings, note = await self._make_it_run(updated, findings)
+        outcome: dict = {}
+        async for update in self._make_it_run(updated, findings, outcome):
+            yield update
+        updated, findings, note = outcome["html"], outcome["findings"], outcome["note"]
 
         yield Finished(
             built=Built(
@@ -211,48 +229,72 @@ class GamesKind:
     # --- making it run ---------------------------------------------------
 
     async def _make_it_run(
-        self, html: str, findings: tuple[Finding, ...]
-    ) -> tuple[str, tuple[Finding, ...], str]:
-        """Play it, and fix what playing it found.
+        self, html: str, findings: tuple[Finding, ...], outcome: dict
+    ) -> AsyncIterator[BuildUpdate]:
+        """Play it, fix what playing it found, and say so while it happens.
 
-        Returns the best document reached, what is still wrong with it, and a
-        sentence for the person if it is being shown despite a problem.
+        A generator rather than a plain call, because playing a game takes
+        seconds and repairing one takes a whole model round-trip. Done
+        silently that is a minute with nothing on screen, which is
+        indistinguishable from a stream that has died -- and was mistaken for
+        exactly that.
+
+        The result is left in `outcome`: the best document reached, what is
+        still wrong with it, and a sentence for the person if it is being
+        shown despite a problem.
         """
+
+        def settle(document: str, left: tuple[Finding, ...], note: str) -> None:
+            outcome["html"], outcome["findings"], outcome["note"] = document, left, note
+
+        settle(html, findings, "")
         if not self._playtest:
-            return html, findings, ""
+            return
 
         for attempt in range(FIX_ATTEMPTS + 1):
+            yield Step(
+                label="Playing it" if attempt == 0 else "Playing it again",
+                detail="pressing the keys to see what breaks",
+            )
             try:
                 result = await play(html, width=self.canvas.width, height=self.canvas.height)
             except RasterUnavailable:
                 # No browser in this deployment. The game is shown unplayed
                 # rather than withheld, and the person is told which it is.
                 logger.info("no browser to playtest in; shipping unplayed")
-                return html, findings, "This game was not test-run before you saw it."
+                settle(html, findings, "This game was not test-run before you saw it.")
+                return
 
             complaints = result.complaints()
             if not complaints:
-                return html, findings, ""
+                yield Step(label="It plays", detail="no errors, and it keeps running")
+                settle(html, findings, "")
+                return
             if attempt == FIX_ATTEMPTS:
-                return (
+                settle(
                     html,
                     findings + tuple(Finding(c) for c in complaints),
                     _survivable(result),
                 )
+                return
 
+            yield Step(label="Fixing what broke", detail=complaints[0][:80])
             repaired = Written()
             async for _ in self._model.write(
                 FIX_SYSTEM, _fix_request(html, complaints), repaired, temperature=0.1
             ):
                 pass
             candidate = strip_fence(repaired.text).strip()
-            if candidate:
-                candidate = stage(candidate)
             if not candidate:
-                return html, findings + tuple(Finding(c) for c in complaints), _survivable(result)
-            html = candidate
+                settle(
+                    html,
+                    findings + tuple(Finding(c) for c in complaints),
+                    _survivable(result),
+                )
+                return
+            html = stage(candidate)
             findings = self._check(html)
-        return html, findings, ""
+            settle(html, findings, "")
 
     # --- what can be known without running it -----------------------------
 
