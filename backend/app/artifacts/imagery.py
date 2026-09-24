@@ -320,6 +320,40 @@ def detach_photos(document: str) -> tuple[str, list[str]]:
     return (_DECLARATION.sub("", document) if uris else document), uris
 
 
+_NAMED = re.compile(
+    r'\s*(' + re.escape(_VARIABLE) + r'(?:-\d+)?)\s*:\s*url\(\s*"(data:[^"]+)"\s*\)\s*;',
+    re.IGNORECASE,
+)
+
+
+def detach_named(document: str) -> tuple[str, dict[str, str]]:
+    """The document without its pictures, and each picture by its name.
+
+    By name rather than in order, because the order is not the naming. A
+    picture nobody ended up using is left out as a hole, so a document can
+    hold `--photo` and `--photo-3` with nothing between them -- and putting
+    those back as the first and second picture renames the third to
+    `--photo-2`, which leaves whatever asked for `--photo-3` with nothing.
+    """
+    named = {m.group(1).lower(): m.group(2) for m in _NAMED.finditer(document)}
+    return (_NAMED.sub("", document) if named else document), named
+
+
+def reattach_named(document: str, named: dict[str, str]) -> str:
+    """Put pictures back under exactly the names they were taken out with."""
+    if not named:
+        return document
+    slots: dict[int, str] = {}
+    for name, uri in named.items():
+        suffix = name[len(_VARIABLE) :].lstrip("-")
+        slots[int(suffix) - 1 if suffix.isdigit() else 0] = uri
+    ordered: list[Photo | None] = [
+        Photo(data_uri=slots[i], source="", width=0, height=0) if i in slots else None
+        for i in range(max(slots) + 1)
+    ]
+    return attach_photos(document, ordered)
+
+
 def reattach_all(document: str, data_uris: Sequence[str]) -> str:
     return attach_photos(
         document,

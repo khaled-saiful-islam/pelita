@@ -44,9 +44,9 @@ from app.artifacts.edits import apply_edits, read_edits
 from app.artifacts.imagery import (
     Photo,
     attach_photos,
-    detach_photos,
+    detach_named,
     find_photo,
-    reattach_all,
+    reattach_named,
     variable_for,
 )
 from app.artifacts.model import ArtifactModel, Written, strip_fence
@@ -234,7 +234,9 @@ class SlidesKind:
         to express as one.
         """
         started = perf_counter()
-        plain, photos = detach_photos(html)
+        # By name: a deck's pictures have holes where a slide did not use its
+        # own, and putting them back in order renames every one after a hole.
+        plain, photos = detach_named(html)
         sections = sections_of(plain)
         if not sections:
             raise ArtifactUnavailable("This deck has no slides to change.")
@@ -268,7 +270,7 @@ class SlidesKind:
         if changed is not None:
             plain = replace_sections(plain, changed)
 
-        revised = reattach_all(plain, photos) if photos else plain
+        revised = reattach_named(plain, photos)
         yield Step(label="Checking it fits")
         yield Finished(
             built=Built(
