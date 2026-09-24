@@ -313,7 +313,7 @@ async def download(
     height = int(spec.get("height") or 1123)
 
     if format == "auto":
-        format = "pdf" if artifact.kind == "slides" else "png"
+        format = _DOWNLOADS.get(artifact.kind, "png")
 
     if format == "html" or not settings.artifact_export_png:
         return Response(
@@ -351,6 +351,11 @@ async def download(
     )
 
 
+# What a download is, by kind, when nobody said. A game and a website are
+# the file: a picture of either is one frame of something meant to be used.
+_DOWNLOADS = {"slides": "pdf", "games": "html", "website": "html"}
+
+
 def _filename(title: str) -> str:
     """A filename from a title, keeping only what every filesystem accepts."""
     kept = [c if c.isalnum() or c in " -_" else "-" for c in title.strip()]
@@ -384,5 +389,10 @@ async def shared(token: str, session: SessionDep, settings: SettingsDep) -> Resp
             # origin — so it is told here instead.
             "X-Artifact-Width": str(public.width),
             "X-Artifact-Height": str(public.height),
+            # What it is and what it may do, for the same reason. A shared page
+            # that framed every artifact with `sandbox=""` showed a game that
+            # could not run and a website whose menu went nowhere.
+            "X-Artifact-Kind": public.kind,
+            "X-Artifact-Sandbox": kind.sandbox.iframe_sandbox if kind else "",
         },
     )

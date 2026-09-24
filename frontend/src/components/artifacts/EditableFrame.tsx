@@ -19,7 +19,7 @@ import { fitScale } from './fit-to-panel'
  * against is what gets applied.
  */
 
-const EDITOR = `
+export const EDITOR = `
 (function () {
   var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
     acceptNode: function (node) {

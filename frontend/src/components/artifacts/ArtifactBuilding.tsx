@@ -39,6 +39,10 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
   const accent = design?.palette?.find(
     (colour) => colour !== ground && colour !== ink,
   )
+  // What each piece is called, and the shape it is drawn at: a deck's slides
+  // are widescreen, a website's pages are the top of a desktop screen.
+  const noun = build.kind === 'website' ? 'page' : 'slide'
+  const thumb = { width: build.width || 1600, height: build.height || 900 }
 
   // The grid reflows with the panel, so the thumbnails are scaled from what a
   // card actually measures rather than from a number picked in advance.
@@ -50,13 +54,16 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
     const measure = () => {
       const card = element.firstElementChild?.firstElementChild
       const width = card?.getBoundingClientRect().width ?? 0
-      if (width > 0) setScale(width / 1600)
+      if (width > 0) setScale(width / thumb.width)
     }
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [total])
+    // Measured once the grid exists, not when the plan arrives: before the
+    // first piece lands there is no grid to measure, and the default only
+    // happened to suit a deck's narrowest cards.
+  }, [total, thumb.width, made.size > 0])
 
   if (!total && !showLook) return null
 
@@ -89,7 +96,7 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-3 shrink-0 animate-spin text-primary" aria-hidden />
               <span className="shimmer">
-                Writing slide {made.size + 1}
+                Writing {noun} {made.size + 1}
                 {planned[made.size] ? ` — ${planned[made.size]}` : ''}
               </span>
             </p>
@@ -107,9 +114,9 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
                 <div key={part.index} className="min-w-0">
                   <div
                     className="arriving relative overflow-hidden rounded-md shadow-md ring-1 ring-border"
-                    style={{ aspectRatio: '16 / 9' }}
+                    style={{ aspectRatio: `${thumb.width} / ${thumb.height}` }}
                   >
-                    <SlideThumb html={part.html} />
+                    <SlideThumb html={part.html} width={thumb.width} height={thumb.height} />
                     <span className="absolute bottom-0 right-0 rounded-tl bg-background/85 px-1 text-[10px] tabular-nums">
                       {part.index + 1}
                     </span>
@@ -129,7 +136,7 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
 }
 
 /** One finished slide, small. Its own document, so it looks like itself. */
-function SlideThumb({ html }: { html: string }) {
+function SlideThumb({ html, width, height }: { html: string; width: number; height: number }) {
   return (
     <iframe
       aria-hidden
@@ -139,8 +146,8 @@ function SlideThumb({ html }: { html: string }) {
       sandbox=""
       referrerPolicy="no-referrer"
       style={{
-        width: 1600,
-        height: 900,
+        width,
+        height,
         // Scaled by the container rather than a fixed number, so the grid can
         // reflow at any panel width without the thumbnails lying about it.
         transform: 'scale(var(--thumb-scale, 0.1125))',

@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Globe } from 'lucide-react'
+import { AlertCircle, Check, Globe, Sparkles } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ToolActivity as Activity } from '@/hooks/useChat'
 
@@ -21,6 +21,9 @@ export function ToolActivityList({ activities }: { activities: Activity[] }) {
   )
 }
 
+/** The tools that make something rather than look something up. */
+const MAKERS = new Set(['create_artifact', 'edit_artifact'])
+
 function Row({ activity }: { activity: Activity }) {
   const running = activity.status === 'running'
   const failed = activity.status === 'failed'
@@ -37,7 +40,13 @@ function Row({ activity }: { activity: Activity }) {
       {failed ? (
         <AlertCircle className="size-3.5 shrink-0" aria-hidden />
       ) : running ? (
-        <Globe className="size-3.5 shrink-0 animate-pulse text-primary" aria-hidden />
+        // The globe means searching. A build is not a search, and showing one
+        // while a website is made said the wrong thing twice over.
+        MAKERS.has(activity.tool) ? (
+          <Sparkles className="size-3.5 shrink-0 animate-pulse text-primary" aria-hidden />
+        ) : (
+          <Globe className="size-3.5 shrink-0 animate-pulse text-primary" aria-hidden />
+        )
       ) : (
         <Check className="size-3.5 shrink-0 text-success" aria-hidden />
       )}

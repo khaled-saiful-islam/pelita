@@ -272,6 +272,96 @@ own text.
 A game downloads as HTML and nothing else. A picture of a game is its first
 frame with nobody playing.
 
+### Websites, and the one kind that is several things at once
+
+A website is a design system, a header and footer that frame every page, and
+the pages. It is built in that order, the way a studio would, and it stays one
+file: a download, a share link and a new tab all already understand one file.
+"Several pages" is several `<section data-page="...">` elements in one
+document.
+
+| step | produces |
+|---|---|
+| **plan** | what it is for, who it is for, a named direction, and every page with its sections in order |
+| **shell** | one stylesheet every page is built from, the header, the footer, a little behaviour — written while the photographs are found |
+| **pages** | each written on its own against that stylesheet, three at a time, shown in the panel as they land |
+| **opened** | at 1280px and at a 390px phone, every page visited; what is wrong goes back to the part it belongs to |
+
+**How many pages is the plan's call** unless the person says. A landing page, a
+launch or an event is one long page with in-page navigation; a restaurant, a
+clinic or a studio is Home plus two to four others. A fixed default would be
+wrong for one of those every time.
+
+**Writing the pages separately is what makes a five-page site possible.** One
+call for the whole site runs out of room around the third page and trails off.
+A page written against a finished stylesheet has one job and the whole budget
+for it, and the stylesheet — with a comment at the top naming every class and
+what it is for — is what keeps five separately written pages looking like one
+site.
+
+**Routing is code, not model output.** `site_assembly.py` adds it afterwards:
+the page links where the shell left `<!--NAV-->`, a line at the very top of
+`<head>` that hides every page but the one the address names before anything is
+painted, and one script at the end of `<body>` for routing, scroll-reveal and
+forms. It is the same on every site, it is the part that breaks when it is
+improvised, and when it breaks the site is not slightly worse, it is one long
+page. Three details were not obvious:
+
+- A frame's address can refuse to change, so the page is shown first and the
+  address follows. Links are handled by the router rather than left to the
+  browser, which also stops a link to another site replacing the website with
+  somebody else's page inside the panel.
+- A sandbox without `allow-forms` refuses a submission *before* the submit
+  event fires, so no script ever hears about it and a contact form is a button
+  that does nothing. `SandboxPolicy(forms=True)` lets the event fire;
+  `form-action 'none'` still means nothing is ever sent anywhere. The router
+  checks the form and shows its `.form-success` in its place.
+- A page may carry no script and no inline handler — both are stripped — and
+  every word a visitor reads is in the HTML, never written by script. That is
+  what lets the pencil edit a website: the words on screen are the words the
+  server numbers.
+
+Two guards sit in that stylesheet, both at zero specificity with `:where()`,
+so any rule the design wrote still wins:
+
+- `min-width: 0` on everything inside a page. Grid and flex items refuse to
+  shrink below their content unless told they may, and a one-column grid whose
+  track grew to its content's width was 24px past a 390px phone on the first
+  real site built — the whole page scrolled sideways. A test reproduces it and
+  proves it fails without the guard.
+- Photographs are set directly on the element. The shell and a page are
+  separate calls and each invents its own way of passing a picture along: on
+  that same first site the shell's `.media` showed `var(--img)` only with a
+  `data-img` attribute, the page set `--img: var(--photo-2)` without one, and
+  the hero was an empty brown box. Any element whose style names a photograph
+  now also gets it as its `background-image`, whatever either thought the
+  convention was.
+
+Everything added is marked `data-pelita`, so it is taken out and put back
+exactly when the site changes; a site read back and reassembled is the same
+bytes.
+
+**Opened, not read.** A site fails in ways the markup does not announce: a
+script that throws so the menu never opens, a page with nothing on it, a
+pricing table 1100px wide that on a phone scrolls the whole site sideways.
+`sitetest.py` opens the site in the export browser at both widths and visits
+every page. At phone width it names the outermost element that runs past the
+edge — not a strip scrolling inside its own box, not a drawer tucked
+off-canvas — and which page it is on. Errors go to the shell, because pages
+have no scripts; a wide table goes to its page. One round of repairs, each part
+fixed on its own and all at once, then it is opened again.
+
+**Changing one** is sent to the part it belongs to. A word or a colour is a
+find-and-replace; a new page is written against the existing stylesheet and
+added to the nav; a page that needs a different structure is rewritten alone.
+Everything else is untouched by construction.
+
+In the panel a website fills the height and scrolls, laid out at the width of
+the screen being looked at — **Desktop**, **Tablet** or **Phone** — rather than
+at whatever width the panel happens to be, which is nobody's device. Its pages
+are repeated as tabs above it, synced by message with the router inside the
+frame. It downloads as one HTML file with every page in it.
+
 ### A photograph, when the design wants one
 
 A model cannot produce a photograph, and one asked for a picture writes a URL
@@ -465,6 +555,22 @@ documented failure of every implementation that has tried it.
   build in flight, and to run several workers it needs a shared store and a
   pub/sub channel. The interface is three methods and nothing outside the
   file knows how it works.
+- **A website's photographs are backgrounds.** They arrive as CSS variables, so
+  they cannot be an `<img>`; a site uses them on `.media` blocks and heroes.
+- **Up to six photographs per site**, each a few hundred kilobytes embedded. A
+  site with every one of them is a two-megabyte file.
+- **Pages are written in parallel, and a failed one is dropped** with its nav
+  link rather than shipped empty. The home page failing fails the build.
+- **A website build is two to three minutes.** The shell's stylesheet is the
+  largest single thing any kind writes and nothing else can start until it
+  exists, so the shell is held to about 14 KB: the first real site, before
+  that, spent 200 of its 284 seconds on a 39 KB stylesheet; the next, with it,
+  was built end to end in 134. A one-page site is one long page written in one
+  call, and cannot be split across writers the way pages are.
+- **A model's own conventions can still disagree.** The shell and each page
+  are written separately; the guards above cover the two disagreements found
+  so far (photographs, and grid items that will not shrink). Others will
+  exist.
 - **The build clock restarts when the page does.** The steps replay with the
   server's own timings in them ("Composing 13.8 KB in 70s"), but the elapsed
   counter in the header counts from when this browser started watching.

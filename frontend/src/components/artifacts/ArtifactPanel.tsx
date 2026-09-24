@@ -21,11 +21,14 @@ import { DeckFilmstrip } from '@/components/artifacts/DeckFilmstrip'
 import { ArtifactBuilding } from '@/components/artifacts/ArtifactBuilding'
 import { lookOf } from '@/components/artifacts/kind-look'
 import { EditableFrame } from '@/components/artifacts/EditableFrame'
+import { SiteBar } from '@/components/artifacts/SiteBar'
+import { SiteFrame } from '@/components/artifacts/SiteFrame'
 import { ShareArtifactDialog } from '@/components/artifacts/ShareArtifactDialog'
 import { useArtifact } from '@/hooks/useArtifact'
 import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { isDeck, slidesOf } from '@/lib/deck'
+import { isSite, sitePages, type Device } from '@/lib/site'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
 /**
@@ -76,9 +79,18 @@ export function ArtifactPanel({
   )
   const [current, setCurrent] = useState(0)
 
+  const site = !!artifact && isSite(artifact.kind)
+  const pages = useMemo(() => (artifact && site ? sitePages(artifact.html) : []), [artifact, site])
+  const [device, setDevice] = useState<Device>('desktop')
+  const [sitePage, setSitePage] = useState<string | null>(null)
+
   // Back to the first slide whenever a different deck, or a different version
   // of one, arrives — slide nine of the old one is not slide nine of this one.
-  useEffect(() => setCurrent(0), [artifact?.id, artifact?.version])
+  // The same for a site's page: a new version may not have the old one.
+  useEffect(() => {
+    setCurrent(0)
+    setSitePage(null)
+  }, [artifact?.id, artifact?.version])
 
   useEffect(() => {
     if (!deck || slides.length < 2 || editing) return
@@ -136,7 +148,10 @@ export function ArtifactPanel({
           <h2 className="truncate text-sm font-medium leading-tight">{title}</h2>
           {artifact && (
             <p className="truncate text-[11px] leading-tight text-muted-foreground">
-              {artifact.kind} · {artifact.width}×{artifact.height}
+              {artifact.kind} ·{' '}
+              {site
+                ? `${pages.length} page${pages.length === 1 ? '' : 's'}`
+                : `${artifact.width}×${artifact.height}`}
               {artifact.versions.length > 1 && ` · v${artifact.version}`}
             </p>
           )}
@@ -199,7 +214,7 @@ export function ArtifactPanel({
               <Button variant="ghost" size="sm" onClick={() => setSharing(true)} title="Share a link">
                 <Link2 className="size-4" aria-hidden />
               </Button>
-              <DownloadMenu artifact={artifact} deck={deck} playable={playable} />
+              <DownloadMenu artifact={artifact} deck={deck} playable={playable} site={site} />
               <a
                 href={`/api/artifacts/${artifact.id}/raw?version=${artifact.version}`}
                 target="_blank"
@@ -242,10 +257,20 @@ export function ArtifactPanel({
 
         {artifact && showing === 'preview' && (
           <>
+            {site && (
+              <SiteBar
+                pages={pages}
+                page={sitePage}
+                onPage={setSitePage}
+                device={device}
+                onDevice={setDevice}
+              />
+            )}
             {editing && (
               <p className="mx-4 mt-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
-                Click any words on the poster to change them. Only the words change — nothing
-                else moves, and it is saved without redrawing.
+                Click any words on the {site ? 'site' : 'poster'} to change them.
+                {site && ' Use the pages above to reach the others.'} Only the words
+                change — nothing else moves, and it is saved without redrawing.
               </p>
             )}
             {!editing && fit && !fit.fits && (
@@ -261,7 +286,21 @@ export function ArtifactPanel({
                 </span>
               </div>
             )}
-            {deck && !editing ? (
+            {site ? (
+              <SiteFrame
+                html={artifact.html}
+                sandbox={artifact.sandbox}
+                title={artifact.title}
+                device={device}
+                page={sitePage}
+                onPage={setSitePage}
+                onEdit={
+                  editing
+                    ? (index, text) => setChanges((was) => new Map(was).set(index, text))
+                    : undefined
+                }
+              />
+            ) : deck && !editing ? (
               <>
                 <DeckFrame
                   html={artifact.html}
@@ -351,12 +390,16 @@ function DownloadMenu({
   artifact,
   deck,
   playable,
+  site,
 }: {
   artifact: { id: string; version: number }
   deck: boolean
   /** A game: the file is the thing, and there is no picture of it. */
   playable?: boolean
+  /** A website: one file with every page in it. */
+  site?: boolean
 }) {
+  const fileOnly = playable || site
   const [open, setOpen] = useState(false)
   const base = `/api/artifacts/${artifact.id}/download?version=${artifact.version}`
 
@@ -377,7 +420,7 @@ function DownloadMenu({
           <span className="absolute right-0 top-full z-20 mt-1 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-background py-1 shadow-lg">
             {/* A game has one download, because a picture of one is its first
                 frame with nobody playing. The file opens and plays anywhere. */}
-            {!playable && (
+            {!fileOnly && (
               <a
                 href={base}
                 download
@@ -399,12 +442,14 @@ function DownloadMenu({
               className="px-3 py-2 text-left text-xs hover:bg-hover"
             >
               <span className="block font-medium">
-                {playable ? 'Game (HTML)' : 'Document (HTML)'}
+                {playable ? 'Game (HTML)' : site ? 'Website (HTML)' : 'Document (HTML)'}
               </span>
               <span className="block text-muted-foreground">
                 {playable
                   ? 'One file. Open it in any browser and play'
-                  : 'To edit or print later'}
+                  : site
+                    ? 'One file with every page in it. Opens in any browser'
+                    : 'To edit or print later'}
               </span>
             </a>
           </span>

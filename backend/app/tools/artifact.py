@@ -70,9 +70,10 @@ class CreateArtifactTool:
             "Make something to look at rather than read: "
             f"{made} "
             "Call this whenever somebody asks for one of these, in any words - "
-            "a poster, a flyer, a deck, slides, a presentation. Never write it "
-            "out in the message instead: a list of slide headings in a chat "
-            "reply is not a deck, and it is not what they asked for. Do not "
+            "a poster, a flyer, a deck, slides, a presentation, a game, a "
+            "website, a landing page, a homepage. Never write it out in the "
+            "message instead: a list of slide headings in a chat reply is not a "
+            "deck, and HTML in a chat reply is not a website. Do not "
             "call it to format an answer that is really text, and do not write "
             "any HTML or CSS yourself - describe what is wanted and it gets "
             "designed."
@@ -122,10 +123,11 @@ class CreateArtifactTool:
                     "description": (
                         "How many pieces, when the person said a number - "
                         "'eight slides', 'a 12 page deck', 'a game with 3 "
-                        "levels'. Copy their number exactly. Leave it out "
-                        "entirely when they did not say. \"A slide\", \"a "
-                        "deck\" and \"a game\" are not numbers - that is "
-                        "the word 'a', and it means they did not say."
+                        "levels', 'a 4 page website'. Copy their number "
+                        "exactly. Leave it out entirely when they did not "
+                        "say. \"A slide\", \"a deck\", \"a game\" and "
+                        "\"a website\" are not numbers - that is the word "
+                        "'a', and it means they did not say."
                     ),
                 },
             },

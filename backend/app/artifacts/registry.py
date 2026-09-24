@@ -13,6 +13,7 @@ from app.artifacts.games import GamesKind
 from app.artifacts.model import ArtifactModel
 from app.artifacts.poster import PosterKind
 from app.artifacts.slides import SlidesKind
+from app.artifacts.website import WebsiteKind
 from app.core.config import Settings, get_settings
 from app.providers.openai_compatible import OpenAICompatibleProvider
 from app.tools.serpapi import SerpApiSearch
@@ -62,6 +63,15 @@ def build_kinds(settings: Settings | None = None) -> dict[str, ArtifactKind]:
             # be several times the size of one poster.
             max_bytes=settings.artifact_max_bytes * 8,
             search=search,
+        ),
+        WebsiteKind(
+            model,
+            # Several pages and up to six photographs, embedded, because a site
+            # has to keep working as one file after it is downloaded.
+            max_bytes=settings.artifact_max_bytes * 4,
+            search=search,
+            # The same browser and the same switch as the game's playtest.
+            check=settings.artifact_playtest,
         ),
     ]
     return {kind.name: kind for kind in kinds}

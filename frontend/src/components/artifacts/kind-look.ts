@@ -1,4 +1,4 @@
-import { Gamepad2, Image as ImageIcon, Presentation, Sparkles } from 'lucide-react'
+import { AppWindow, Gamepad2, Image as ImageIcon, Presentation, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 /**
@@ -69,6 +69,19 @@ const LOOKS: Record<string, KindLook> = {
     hover: 'hover:border-kind-games/60 hover:from-kind-games/20 hover:to-kind-games/[0.08]',
     ring: 'ring-kind-games/50',
     ratio: '900 / 640',
+  },
+  website: {
+    // A browser window, not a globe: the globe is web search's, on the search
+    // button and on every search the assistant runs, and a website wearing it
+    // read as one more search.
+    icon: AppWindow,
+    colour: 'text-kind-website',
+    tile: 'bg-kind-website text-white',
+    surface: 'bg-gradient-to-r from-kind-website/12 to-kind-website/[0.04]',
+    border: 'border-kind-website/30',
+    hover: 'hover:border-kind-website/60 hover:from-kind-website/20 hover:to-kind-website/[0.08]',
+    ring: 'ring-kind-website/50',
+    ratio: '1280 / 800',
   },
 }
 

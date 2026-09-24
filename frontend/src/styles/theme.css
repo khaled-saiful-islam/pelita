@@ -61,6 +61,7 @@
   --kind-poster: 350 68% 48%;
   --kind-slides: 199 80% 38%;
   --kind-games: 264 60% 55%;
+  --kind-website: 162 72% 33%;
 
   --primary: var(--accent-500);
   --primary-foreground: 26 65% 13%;
@@ -126,6 +127,7 @@
     --kind-poster: 350 80% 68%;
     --kind-slides: 199 82% 62%;
     --kind-games: 264 82% 75%;
+    --kind-website: 160 64% 56%;
 
     --primary: var(--accent-400);
     --primary-foreground: 26 70% 10%;
@@ -171,6 +173,7 @@
   --kind-poster: 350 80% 68%;
   --kind-slides: 199 82% 62%;
   --kind-games: 264 82% 75%;
+  --kind-website: 160 64% 56%;
 
   --primary: var(--accent-400);
   --primary-foreground: 26 70% 10%;
@@ -213,6 +216,7 @@
   --color-kind-poster: hsl(var(--kind-poster));
   --color-kind-slides: hsl(var(--kind-slides));
   --color-kind-games: hsl(var(--kind-games));
+  --color-kind-website: hsl(var(--kind-website));
   --color-primary: hsl(var(--primary));
   --color-primary-foreground: hsl(var(--primary-foreground));
   --color-secondary: hsl(var(--secondary));

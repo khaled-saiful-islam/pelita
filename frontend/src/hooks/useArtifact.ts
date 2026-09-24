@@ -34,6 +34,9 @@ export function useArtifact(artifactId: string | null, revision = 0) {
       // throwaway frame takes seconds, and a panel that shows nothing for
       // five of them looks broken — which is a worse failure than the one the
       // measurement is looking for, and a far more common one.
+      // A poster only. The check measures words against a fixed page's edge,
+      // and a website or a game has no such edge: it scrolls, or it plays.
+      if (detail.kind !== 'poster') return
       void checkFit(detail.html).then((result) => {
         // Still the same artifact? A fast click through two of them would
         // otherwise pin the first one's verdict onto the second.

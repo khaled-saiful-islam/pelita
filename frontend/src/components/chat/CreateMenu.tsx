@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Image as ImageIcon, Presentation, Sparkles } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
+import { lookOf } from '@/components/artifacts/kind-look'
 import { cn } from '@/lib/utils'
 
 export interface Makeable {
@@ -21,14 +22,11 @@ export interface Makeable {
  * A person can then say what they actually want, and can see exactly what will
  * be sent.
  */
-const ICONS: Record<string, typeof ImageIcon> = {
-  poster: ImageIcon,
-  slides: Presentation,
-}
-
 const OPENINGS: Record<string, string> = {
   poster: 'Design a poster for ',
   slides: 'Make a slide deck about ',
+  games: 'Build a game: ',
+  website: 'Build a website for ',
 }
 
 export function CreateMenu({
@@ -79,7 +77,8 @@ export function CreateMenu({
           className="absolute bottom-full left-0 z-30 mb-2 w-72 overflow-hidden rounded-lg border border-border bg-background py-1 shadow-xl"
         >
           {makeable.map((thing) => {
-            const Icon = ICONS[thing.name] ?? Sparkles
+            const look = lookOf(thing.name)
+            const Icon = look.icon
             return (
               <button
                 key={thing.name}
@@ -91,8 +90,16 @@ export function CreateMenu({
                 }}
                 className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-hover"
               >
-                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted">
-                  <Icon className="size-3.5 text-muted-foreground" aria-hidden />
+                {/* In the kind's own colour, the same one its card and panel
+                    wear, so the menu already says what each thing will look
+                    like in the conversation. */}
+                <span
+                  className={cn(
+                    'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md',
+                    look.tile,
+                  )}
+                >
+                  <Icon className="size-3.5" aria-hidden />
                 </span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium">{thing.label}</span>

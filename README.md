@@ -85,6 +85,7 @@ default.
 | **Posters** | Ask for one and a poster is designed, not filled into a template — its own palette, type and layout, with photographs found on the web and embedded so the file stands alone. Opens in a panel beside the chat: share, open, download as PNG |
 | **Slide decks** | A deck planned as a talk, then written one slide at a time so the first appears while the last is still being made. Five slides unless you say otherwise; it opens and closes like a talk; it moves between grounds it named itself for the subject; 16:9 enforced. Download as PDF |
 | **Games** | A playable browser game, in one HTML file that opens anywhere. It is run in a real browser before you see it — keys pressed, console read — and what broke goes back to the model to fix. Keyboard *and* touch, pause, restart, and no network |
+| **Websites** | A one-page landing page or a site of several pages — the plan decides from what you asked, unless you give a number. Its own design system, real photographs, and pages written separately so a five-page site does not trail off. Opened on a desktop and a phone before you see it, every page visited, and what breaks is fixed in the part it belongs to. In the panel: page tabs and Desktop / Tablet / Phone. Downloads as one HTML file with every page in it |
 | **Watching one being made** | The panel shows the artifact forming: its real proportions, its real ground, its title in the face it just chose, and why it looks like that. A deck swaps it for real slides as they land. Never the markup being written |
 | **Editing an artifact** | Ask in the chat box and only what you named changes — a colour change touches two lines of a 237 KB document, not the whole design. Fixing a word in place takes no model call and no new version |
 | **Export** | Any conversation as Markdown |
@@ -132,10 +133,11 @@ Three ideas make this a template rather than an app:
 **Everything pluggable is a Protocol with a registry.** Providers, guards,
 search backends and artifact kinds are each one file plus one registry line.
 Nothing else imports a concrete implementation — slides shipped as
-`slides.py` plus one line in `artifacts/registry.py`, and games as `games.py`
-plus one more. The chat turn, the tool and the panel did not change to admit
-either, and a game is the first artifact that executes: the privilege is one
-field on the kind.
+`slides.py` plus one line in `artifacts/registry.py`, games as `games.py`
+plus one more, and websites as `website.py` plus one more. The chat turn and
+the tool did not change to admit any of them. A game is the first artifact that
+executes and a website the first that answers its own forms: each privilege is
+one field on the kind.
 
 **The prompt is built by ordered contributors.** System prompt at 100, memory at
 200, tool results at 300, attached files at 350, history at 400, the user message
@@ -154,7 +156,7 @@ backend/app/
 ├── guards/      base.py (Protocol) + prompt_injection.py + registry.py
 ├── context/     the ordered contributor pipeline
 ├── tools/       serpapi.py, news_mcp.py, artifact.py
-├── artifacts/   base.py (Protocol) + poster.py + slides.py + games.py + registry.py
+├── artifacts/   base.py (Protocol) + poster.py + slides.py + games.py + website.py + registry.py
 └── db/          models, repositories, session
 frontend/src/styles/theme.css    every colour, in one file
 ```

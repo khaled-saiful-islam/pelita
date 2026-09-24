@@ -31,7 +31,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.artifacts.base import DesignSpec, OpenArtifact
+from app.artifacts.base import Built, DesignSpec, OpenArtifact
 from app.context.base import (
     AttachedDocument,
     ContextContributor,
@@ -651,7 +651,7 @@ class ChatService:
                 f"The {made.kind} \"{made.title}\" is made and is on screen next to "
                 "the conversation. Tell them briefly what you made and what they "
                 "can change. Do not describe the markup and do not repeat the text "
-                "on it." + _caveats(built.note)
+                "on it." + _facts(built) + _caveats(built.note)
             )
 
     def _record(
@@ -1223,6 +1223,32 @@ async def _updates(tool: Tool, arguments: dict[str, Any]) -> AsyncIterator[ToolU
             yield update
         return
     yield Results(items=tuple(await tool.run(**arguments)))
+
+
+def _facts(built: Built) -> str:
+    """What it actually is and how it actually looks, for the model to use.
+
+    It never sees the document. Told only that something was made, it
+    described a warm orange-on-ink landing page as "a clean blue and white
+    colour scheme", and a four-page site as "a single-page website" -- both
+    confidently, both invented.
+    """
+    spec = built.spec
+    said = []
+    if built.summary:
+        said.append(f"It is {built.summary}.")
+    if spec.movement:
+        look = f"Its look: {spec.movement}"
+        said.append(f"{look} -- {spec.rationale}" if spec.rationale else f"{look}.")
+    if spec.display_font and spec.body_font:
+        said.append(f"Set in {spec.display_font} and {spec.body_font}.")
+    if not said:
+        return ""
+    return (
+        " " + " ".join(said)
+        + " Describe it only from these facts; never name a colour or a layout "
+        "you have not been told."
+    )
 
 
 def _caveats(note: str) -> str:

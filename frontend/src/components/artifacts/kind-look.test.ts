@@ -3,12 +3,12 @@ import { lookOf } from './kind-look'
 
 describe('lookOf', () => {
   it('gives each kind its own colour and glyph', () => {
-    const [poster, slides, games] = [lookOf('poster'), lookOf('slides'), lookOf('games')]
-    const colours = new Set([poster.colour, slides.colour, games.colour])
-    const glyphs = new Set([poster.icon, slides.icon, games.icon])
+    const looks = ['poster', 'slides', 'games', 'website'].map(lookOf)
+    const colours = new Set(looks.map((look) => look.colour))
+    const glyphs = new Set(looks.map((look) => look.icon))
 
-    expect(colours.size).toBe(3)
-    expect(glyphs.size).toBe(3)
+    expect(colours.size).toBe(4)
+    expect(glyphs.size).toBe(4)
   })
 
   it('falls back for a kind it has never heard of', () => {

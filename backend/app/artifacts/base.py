@@ -57,12 +57,26 @@ class SandboxPolicy:
     scripts: bool = False
     fonts: bool = True
     images: bool = False
+    # Whether a form's submit event fires at all. A sandbox without it does
+    # not just stop the form sending: it refuses the submission before the
+    # event, so no script ever hears about it and a contact form is a button
+    # that does nothing. `form-action 'none'` still holds, so nothing is ever
+    # sent anywhere; this only lets the document answer its own form.
+    forms: bool = False
 
     @property
     def iframe_sandbox(self) -> str:
         """The `sandbox` attribute value. Empty is the strongest setting there
         is: an opaque origin with scripts, forms and navigation all refused."""
-        return "allow-scripts" if self.scripts else ""
+        return " ".join(self._allowed())
+
+    def _allowed(self) -> list[str]:
+        allowed = []
+        if self.scripts:
+            allowed.append("allow-scripts")
+        if self.forms:
+            allowed.append("allow-forms")
+        return allowed
 
     @property
     def csp(self) -> str:
@@ -70,7 +84,7 @@ class SandboxPolicy:
         share link. `sandbox` here does what the iframe attribute does for the
         preview — the document gets an opaque origin, so it cannot read a cookie
         or call the API with one."""
-        sandbox = "sandbox allow-scripts" if self.scripts else "sandbox"
+        sandbox = " ".join(["sandbox", *self._allowed()])
         # Inline only. An artifact is one self-contained file by contract, so
         # every script it runs is already in it — and `https:` would have been
         # both too much (any origin on the web) and too little (it does not
@@ -255,6 +269,10 @@ class Built:
     # One sentence for a person, when something did not go to plan in a way
     # they would otherwise never learn about.
     note: str = ""
+    # What was made, in a line the chat model can repeat truthfully -- "four
+    # pages: Home, Menu, Story, Visit". It never sees the document, and told
+    # nothing, it describes one it imagined.
+    summary: str = ""
 
 
 # --- what a build reports while it runs ---------------------------------

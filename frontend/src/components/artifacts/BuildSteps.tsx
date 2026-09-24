@@ -14,6 +14,9 @@ import type { ArtifactBuild } from '@/lib/chat-types'
 const PATIENCE: Record<string, string> = {
   poster: 'A poster takes a minute or so. It is being designed, not filled into a template.',
   slides: 'A deck takes a couple of minutes. Every slide is written on its own.',
+  games: 'A game takes a couple of minutes. It is played in a browser before you see it.',
+  website:
+    'A website takes a few minutes. Every page is written on its own, then opened on a desktop and a phone before you see it.',
 }
 
 export function BuildSteps({ build }: { build: ArtifactBuild }) {
