@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { lookOf } from '@/components/artifacts/kind-look'
 import type { ArtifactBuild } from '@/lib/chat-types'
-import { readableOn } from '@/lib/contrast'
+import { accentOn, readableOn } from '@/lib/contrast'
 
 /**
  * The artifact, before it exists.
@@ -43,8 +43,7 @@ export function Forming({ build }: { build: ArtifactBuild }) {
   // By measured contrast, not by position. A palette is a list, not named
   // roles, and one whose first two colours were both cream put cream on cream.
   const ink = design ? readableOn(ground, design.palette.slice(1)) : '#ffffff'
-  const accent =
-    design?.palette?.find((colour) => colour !== ground && colour !== ink) ?? ink
+  const accent = design ? accentOn(ground, ink, design.palette) : ink
 
   useFace(design?.display_font)
 

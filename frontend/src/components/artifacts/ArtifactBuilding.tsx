@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
-import { readableOn } from '@/lib/contrast'
+import { accentOn, readableOn } from '@/lib/contrast'
 import { Forming } from '@/components/artifacts/Forming'
 import { arrivesInPieces } from '@/components/artifacts/arrives-in-pieces'
 import type { ArtifactBuild } from '@/lib/chat-types'
@@ -22,6 +22,9 @@ import type { ArtifactBuild } from '@/lib/chat-types'
  * something else.
  */
 
+/** The panel's ground in light mode, which is where the chips are read. */
+const PANEL = '#fdfcfa'
+
 export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
   const planned = build.plan ?? []
   const made = new Map(build.parts.map((part) => [part.index, part]))
@@ -36,9 +39,9 @@ export function ArtifactBuilding({ build }: { build: ArtifactBuild }) {
   // Picked by contrast, not by position: a palette is a list, not named roles,
   // and a deck whose first two colours were both cream put cream on cream.
   const ink = design ? readableOn(ground, design.palette.slice(1)) : undefined
-  const accent = design?.palette?.find(
-    (colour) => colour !== ground && colour !== ink,
-  )
+  // The chips sit on the panel, not on the card, so they are measured against
+  // the panel's own ground rather than the artifact's.
+  const accent = design ? accentOn(PANEL, ink ?? '#111111', design.palette) : undefined
   // What each piece is called, and the shape it is drawn at: a deck's slides
   // are widescreen, a website's pages are the top of a desktop screen.
   const noun = build.kind === 'website' ? 'page' : 'slide'

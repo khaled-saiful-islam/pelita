@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { contrast, readableOn } from './contrast'
+import { accentOn, contrast, readableOn } from './contrast'
 
 describe('readableOn', () => {
   it('picks the one that can actually be read', () => {
@@ -21,5 +21,16 @@ describe('readableOn', () => {
   it('handles short hex and stray junk without throwing', () => {
     expect(readableOn('#fff', ['#000'])).toBe('#000')
     expect(() => readableOn('nonsense', ['#000'])).not.toThrow()
+  })
+})
+
+describe('accentOn', () => {
+  it('skips a pale accent on a pale ground', () => {
+    // The real one: sand on paper, invisible.
+    expect(accentOn('#f5efe3', '#2b2a28', ['#f5efe3', '#2b2a28', '#e8dcc6', '#b4531f'])).toBe('#b4531f')
+  })
+
+  it('falls back to the ink when nothing else can be seen', () => {
+    expect(accentOn('#f5efe3', '#2b2a28', ['#f5efe3', '#2b2a28', '#ece4d4'])).toBe('#2b2a28')
   })
 })

@@ -53,3 +53,26 @@ export function readableOn(background: string, candidates: string[]): string {
   if (score >= 4.5) return best
   return luminance(background) > 0.4 ? '#111111' : '#f5f5f5'
 }
+
+/**
+ * The palette's accent: a colour of its own, but one that can be seen.
+ *
+ * "The first colour that is neither the ground nor the ink" put a pale sand
+ * eyebrow on a pale paper card, where nobody could read it. The accent is now
+ * the most visible of the remaining colours, and the ink when none of them
+ * reaches 3:1 — the line for large and bold text, which is what an accent is
+ * used for.
+ */
+export function accentOn(background: string, ink: string, palette: string[]): string {
+  let best = ''
+  let score = 0
+  for (const colour of palette) {
+    if (colour === background || colour === ink) continue
+    const ratio = contrast(background, colour)
+    if (ratio > score) {
+      best = colour
+      score = ratio
+    }
+  }
+  return score >= 3 ? best : ink
+}
