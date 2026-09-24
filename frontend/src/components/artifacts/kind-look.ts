@@ -109,3 +109,12 @@ const UNKNOWN: KindLook = {
 export function lookOf(kind: string | undefined): KindLook {
   return (kind && LOOKS[kind]) || UNKNOWN
 }
+
+/**
+ * The kind's colour as a CSS value, for things lit through a custom property
+ * rather than a class — a tile's glow, a scene's ink. Its theme token, so it
+ * follows light and dark with everything else.
+ */
+export function colourOf(kind: string | undefined): string {
+  return kind && LOOKS[kind] ? `hsl(var(--kind-${kind}))` : 'hsl(var(--primary))'
+}

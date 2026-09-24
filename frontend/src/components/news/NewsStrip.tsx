@@ -21,7 +21,7 @@ interface NewsResponse {
 const SCROLL_STEP = 320
 
 /**
- * Headlines above the composer on the new-chat screen.
+ * Headlines across the top of the new-chat screen.
  *
  * Renders nothing at all when news is unavailable — no empty state, no error,
  * no skeleton. It is a decoration, and a decoration that announces its own

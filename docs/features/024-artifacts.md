@@ -146,7 +146,9 @@ Nothing there is invented. Every value is one the artifact has already
 committed to, which is the point: what is on screen while you wait is the
 first true thing about what you are going to get.
 
-It has three states, because the build does:
+It has three states, because the build does. Behind it is a glow in the
+artifact's own theme: its kind's colour until the design exists, then the most
+vivid colour of the palette it chose.
 
 | | What is on the card | What it looks like |
 |---|---|---|
@@ -205,6 +207,31 @@ on it, and that effect calls `reset()` when the route names no conversation
 — which aborts the stream. A `load()` that changed identity on every render
 therefore killed the turn it had just started. `useChat.test.tsx` asserts
 the identity, because nothing about the transcript makes it visible.
+
+### Where the kinds are offered
+
+A Create menu in the composer held them for two kinds. At five it was five
+words behind a button nobody opened, so the kinds moved to where the decision is
+made: right above the box. The news that used to sit there moved to the top of
+the screen.
+
+On a new chat, **Make something** is a row of five tiles, each in its kind's
+colour with a few pixels of what it makes, moving -- a poster's sun rising
+behind its headline, a deck dealing its next slide, a website scrolling, an
+app's buttons being pressed, a snake going round its board -- and one real
+example of something to ask for. A light moves from tile to tile every few
+seconds: the lit tile plays its scene and turns to its next example, so the row
+is never still and never busy. Pointing at a tile takes the light.
+
+Choosing one writes its example into the box **with the subject selected**:
+"Design a poster for *a night market in Ipoh, every Friday 6pm*". The next thing
+typed replaces the subject and keeps the request; Enter sends the example as it
+stands. In a conversation the same five are a slim row of chips that collapses
+while something is typed or answered.
+
+Scenes are plain elements drawn in `currentColor`, lit through one `--tile`
+custom property, and paused at a first frame drawn to be worth looking at when
+not lit. Reduced motion stops all of it.
 
 ### Each kind has a colour
 
@@ -546,8 +573,11 @@ the same rule as search without a key.
 **A new kind** — a one-page app, a résumé, a certificate — is one file implementing
 `ArtifactKind` and one line in `artifacts/registry.py`. It brings its own
 prompt, canvas and sandbox policy. The tool's `kind` enum is built from the
-registry, and so is the Create menu in the composer — a new kind is offered to
-the model and shown to the person by existing.
+registry, and so is the Make rail above the composer — a new kind is offered to
+the model and shown to the person by existing, in the brand colour with a
+spinning mark and its own description as its example until somebody gives it a
+colour, a scene and examples of its own (`kind-look.ts`, `Scene.tsx`,
+`showcase.ts`).
 
 **A build queue.** Generation runs inside the open SSE stream, which is right
 for a single-worker deployment. `ArtifactKind.build` is an interface; a queued

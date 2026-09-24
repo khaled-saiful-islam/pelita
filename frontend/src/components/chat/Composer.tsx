@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useRef as useNodeRef } from 'react'
 import { ArrowUp, Check, Globe, Paperclip, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SearchMode } from '@/hooks/useChat'
 import { acceptAttribute, type AttachedFile } from '@/hooks/useDocuments'
 import { Attachments } from './Attachments'
-import { CreateMenu, type Makeable } from './CreateMenu'
 
 const MAX_HEIGHT_PX = 224 // matches --composer-max-height in theme.css
 const SEARCH_MODE_KEY = 'pelita-search-mode'
@@ -27,40 +26,30 @@ function readMode(): SearchMode {
   return 'auto'
 }
 
-export function Composer({
-  onSend,
-  onStop,
-  streaming,
-  disabled,
-  searchEnabled,
-  makeable = [],
-  imagesEnabled = false,
-  files,
-  uploadingFile,
-  atFileLimit,
-  onAttach,
-  onRemoveFile,
-  placeholder = 'Message Pelita…',
-  autoFocus,
-}: {
-  onSend: (text: string, options: { searchMode: SearchMode }) => void
-  onStop: () => void
-  streaming: boolean
-  disabled?: boolean
-  /** False when SERPAPI_KEY is unset; the toggle is shown but not usable. */
-  searchEnabled: boolean
-  /** What can be made. Empty when no artifact model is configured. */
-  makeable?: Makeable[]
-  /** Whether the picker offers images, which needs a vision model. */
-  imagesEnabled?: boolean
-  files: AttachedFile[]
-  uploadingFile: string | null
-  atFileLimit: boolean
-  onAttach: (file: File) => void
-  onRemoveFile: (id: string) => void
-  placeholder?: string
-  autoFocus?: boolean
-}) {
+/** What the page can do to the box: put a request in it, ready to edit. */
+export interface ComposerHandle {
+  fill: (text: string, selection?: [number, number]) => void
+}
+
+export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Composer(
+  {
+    onSend,
+    onStop,
+    streaming,
+    disabled,
+    searchEnabled,
+    above,
+    imagesEnabled = false,
+    files,
+    uploadingFile,
+    atFileLimit,
+    onAttach,
+    onRemoveFile,
+    placeholder = 'Message Pelita…',
+    autoFocus,
+  },
+  ref,
+) {
   const [value, setValue] = useState('')
   const [searchMode, setSearchMode] = useState<SearchMode>(readMode)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -91,11 +80,34 @@ export function Composer({
     }
   }
 
+  // Picking a kind writes its request here with the subject selected, so the
+  // next thing typed replaces the subject and keeps the request around it.
+  useImperativeHandle(
+    ref,
+    () => ({
+      fill(text, selection) {
+        setValue(text)
+        requestAnimationFrame(() => {
+          const el = textarea.current
+          if (!el) return
+          el.focus()
+          const [start, end] = selection ?? [text.length, text.length]
+          el.setSelectionRange(start, end)
+        })
+      },
+    }),
+    [],
+  )
+
   const canSend = value.trim().length > 0 && !streaming && !disabled
 
   return (
-    <div className="sticky bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-4">
+    <div
+      className="sticky bottom-0 bg-gradient-to-t from-background via-background to-transparent pt-4"
+      data-typing={value.trim().length > 0 ? 'true' : 'false'}
+    >
       <div className="mx-auto w-full max-w-[var(--message-column)] px-4 pb-4">
+        {above}
         <div
           className={cn(
             'rounded-2xl border border-input bg-surface p-2 shadow',
@@ -186,16 +198,6 @@ export function Composer({
             Attach
           </button>
 
-          <CreateMenu
-            makeable={makeable}
-            onPick={(opening) => {
-              // Written into the box rather than arming a hidden mode: the
-              // person then says what they want and can see what will be sent.
-              setValue((current) => (current.trim() ? current : opening))
-              textarea.current?.focus()
-            }}
-          />
-
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}
@@ -271,4 +273,25 @@ export function Composer({
       </div>
     </div>
   )
+})
+
+interface ComposerProps {
+  onSend: (text: string, options: { searchMode: SearchMode }) => void
+  onStop: () => void
+  streaming: boolean
+  disabled?: boolean
+  /** False when SERPAPI_KEY is unset; the toggle is shown but not usable. */
+  searchEnabled: boolean
+  /** Shown directly above the box, inside the same sticky strip: what can be
+   *  made, on the new-chat screen and in a conversation. */
+  above?: React.ReactNode
+  /** Whether the picker offers images, which needs a vision model. */
+  imagesEnabled?: boolean
+  files: AttachedFile[]
+  uploadingFile: string | null
+  atFileLimit: boolean
+  onAttach: (file: File) => void
+  onRemoveFile: (id: string) => void
+  placeholder?: string
+  autoFocus?: boolean
 }

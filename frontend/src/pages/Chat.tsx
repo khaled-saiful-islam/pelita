@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Download, Link2, Menu } from 'lucide-react'
 import { Alert, Button } from '@/components/ui'
 import { Logo } from '@/components/Logo'
-import { Composer } from '@/components/chat/Composer'
+import { Composer, type ComposerHandle } from '@/components/chat/Composer'
+import { MakeChips } from '@/components/make/MakeChips'
+import { MakeRail } from '@/components/make/MakeRail'
+import { inOrder, startWith, type Makeable } from '@/components/make/showcase'
 import { MessageList } from '@/components/chat/MessageList'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { ConversationUsage } from '@/components/chat/Usage'
@@ -44,6 +47,14 @@ export default function Chat() {
   const activeConversationId = chat.conversationId ?? routeId ?? null
   const documents = useDocuments(activeConversationId, { images: config?.images_enabled ?? false })
   const [sharing, setSharing] = useState(false)
+  const composer = useRef<ComposerHandle>(null)
+  const kinds: Makeable[] = useMemo(() => inOrder(config?.makeable ?? []), [config])
+
+  /** A kind picked from the rail or the chips: its request, ready to edit. */
+  function start(kind: Makeable, example?: string) {
+    const { text, selection } = startWith(kind, example)
+    composer.current?.fill(text, selection)
+  }
 
   useEffect(() => {
     setLoadError(null)
@@ -162,7 +173,14 @@ export default function Chat() {
         )}
 
         {empty ? (
-          <EmptyState />
+          <>
+            {/* The news leads now, at the top, and what can be made sits
+                where the decision is — right above the box. */}
+            <div className="pt-3">
+              <NewsStrip />
+            </div>
+            <EmptyState canMake={kinds.length > 0} />
+          </>
         ) : (
           <MessageList
             messages={chat.messages}
@@ -188,13 +206,19 @@ export default function Chat() {
           </div>
         )}
 
-        {empty && <NewsStrip />}
-
         {documents.error && (
           <AttachmentError message={documents.error} onDismiss={documents.clearError} />
         )}
 
         <Composer
+          ref={composer}
+          above={
+            kinds.length === 0 ? null : empty ? (
+              <MakeRail kinds={kinds} onPick={start} />
+            ) : (
+              <MakeChips kinds={kinds} hidden={chat.streaming} onPick={(kind) => start(kind)} />
+            )
+          }
           onSend={(text, options) =>
             chat.send(text, {
               searchMode: options.searchMode,
@@ -209,7 +233,6 @@ export default function Chat() {
           onStop={chat.stop}
           streaming={chat.streaming}
           searchEnabled={config?.search_enabled ?? false}
-          makeable={config?.makeable ?? []}
           imagesEnabled={config?.images_enabled ?? false}
           files={documents.pending}
           uploadingFile={documents.uploading}
@@ -268,14 +291,16 @@ function MenuButton({ onClick, className }: { onClick: () => void; className?: s
   )
 }
 
-function EmptyState() {
+function EmptyState({ canMake }: { canMake: boolean }) {
   return (
-    <div className="flex flex-1 items-center justify-center px-4">
+    <div className="flex flex-1 items-center justify-center px-4 py-6">
       <div className="flex flex-col items-center text-center">
         <Logo className="size-10" />
         <h1 className="mt-4 text-2xl font-semibold tracking-tight">How can I help?</h1>
         <p className="mt-2 max-w-sm text-sm text-muted-foreground">
-          Ask anything. Pelita replies in the language you write in.
+          {canMake
+            ? 'Ask anything, or make something — a poster, a deck, a game, a website, an app.'
+            : 'Ask anything. Pelita replies in the language you write in.'}
         </p>
       </div>
     </div>
