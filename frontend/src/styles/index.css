@@ -132,9 +132,12 @@
     animation: pelita-arrive 380ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  /* The artifact forming. The card itself settles once; the light keeps
-     moving, because the card is the only thing on screen saying that
-     something is still happening. */
+  /* The artifact forming.
+     Three states, because the build has three: before it knows what it will
+     look like, the moment it decides, and while it is being written. Nothing
+     on the card ever comes to rest — it is the only thing on screen saying
+     the work is still moving, and a card that goes still reads as a card
+     that has stopped. */
   @keyframes pelita-form {
     from {
       opacity: 0;
@@ -148,10 +151,35 @@
 
   @keyframes pelita-sheen {
     from {
-      transform: translateX(-120%) rotate(8deg);
+      transform: translateX(-150%) rotate(8deg);
     }
     to {
-      transform: translateX(220%) rotate(8deg);
+      transform: translateX(320%) rotate(8deg);
+    }
+  }
+
+  @keyframes pelita-glow {
+    0%,
+    100% {
+      opacity: var(--glow-low);
+      transform: scale(0.99) translateY(4px);
+    }
+    50% {
+      opacity: var(--glow-high);
+      transform: scale(1.04) translateY(10px);
+    }
+  }
+
+  /* Where the sentence will go, before there is one. Never a progress bar:
+     these say the writing lands here, and claim nothing about how far along
+     anything is. */
+  @keyframes pelita-rule {
+    0%,
+    100% {
+      opacity: 0.14;
+    }
+    50% {
+      opacity: 0.34;
     }
   }
 
@@ -166,8 +194,38 @@
     }
   }
 
+  .forming-stage {
+    --glow-low: 0.2;
+    --glow-high: 0.4;
+  }
+
+  /* The light it is being made under: warm, behind the card, and bleeding
+     past its edges. The one colour in here that is not the artifact's own.
+
+     A solid blob tucked *inside* the card's footprint, and the blur is what
+     puts the halo outside it. Built the obvious way — a radial gradient sized
+     to the glow's own box — the lit part lands entirely behind the card and
+     the gradient is already transparent by the time it clears the edge, so
+     nothing shows at all. */
+  .forming-glow {
+    position: absolute;
+    inset: -2%;
+    border-radius: 26px;
+    background: linear-gradient(145deg, rgb(253 209 85), rgb(245 158 44) 60%, rgb(234 149 28));
+    /* The blur has to clear the card's own edge or none of this is visible —
+       the card is opaque and sits on top of all of it. */
+    filter: blur(34px);
+    pointer-events: none;
+    animation: pelita-glow 3.6s ease-in-out infinite;
+  }
+
   .forming {
     animation: pelita-form 520ms cubic-bezier(0.22, 1, 0.36, 1);
+    /* The look arrives all at once and a full minute in. Cross-fading it is
+       the difference between the card deciding and the card being replaced. */
+    transition:
+      background-color 700ms ease,
+      color 700ms ease;
   }
 
   /* Its own element rather than a pseudo-element on the card, so it can sit
@@ -175,7 +233,7 @@
   .forming .sheen {
     position: absolute;
     inset: -40% -60%;
-    width: 42%;
+    width: 38%;
     pointer-events: none;
     background: linear-gradient(
       100deg,
@@ -184,7 +242,56 @@
       transparent 100%
     );
     opacity: 0.09;
-    animation: pelita-sheen 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    animation: pelita-sheen 3.4s linear infinite;
+  }
+
+  /* Half a cycle behind, so one band is always crossing the card. */
+  .forming .sheen--trailing {
+    animation-delay: -1.7s;
+  }
+
+  .forming-rule {
+    background: currentColor;
+    animation: pelita-rule 1.9s ease-in-out infinite;
+  }
+
+  .forming-rule:last-child {
+    animation-delay: 240ms;
+  }
+
+  /* Nothing decided yet: a cold card under a low light. */
+  .forming-stage[data-phase='reading'] {
+    --glow-low: 0.22;
+    --glow-high: 0.42;
+  }
+
+  .forming-stage[data-phase='reading'] .forming-glow {
+    filter: blur(34px) saturate(0.6);
+  }
+
+  /* It has chosen. The light comes up with the colour. */
+  .forming-stage[data-phase='designed'] {
+    --glow-low: 0.42;
+    --glow-high: 0.72;
+  }
+
+  /* Being written. Same look, more of everything. */
+  .forming-stage[data-phase='making'] {
+    --glow-low: 0.55;
+    --glow-high: 0.95;
+  }
+
+  .forming-stage[data-phase='making'] .forming-glow {
+    animation-duration: 2.3s;
+  }
+
+  .forming-stage[data-phase='making'] .sheen {
+    opacity: 0.13;
+    animation-duration: 2.3s;
+  }
+
+  .forming-stage[data-phase='making'] .sheen--trailing {
+    animation-delay: -1.15s;
   }
 
   /* The title and its sentence arrive when the design does, not with the
@@ -203,6 +310,19 @@
     .forming-title,
     .forming-line {
       animation: none;
+      transition: none;
+    }
+
+    /* The glow stays — it says which phase the build is in — but it stops
+       breathing. */
+    .forming-glow {
+      animation: none;
+      opacity: var(--glow-high);
+    }
+
+    .forming-rule {
+      animation: none;
+      opacity: 0.22;
     }
 
     .forming .sheen {

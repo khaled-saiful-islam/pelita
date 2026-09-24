@@ -29,6 +29,14 @@ export interface KindLook {
   hover: string
   /** The ring on the card whose artifact is open in the panel. */
   ring: string
+  /**
+   * The shape this kind usually is, for the moments before the artifact has
+   * chosen its own. A square standing in for a poster, a deck and a game says
+   * none of them; the kind's own proportions are a true guess, and watching
+   * the card reshape when the design commits to something else is worth
+   * seeing.
+   */
+  ratio: string
 }
 
 const LOOKS: Record<string, KindLook> = {
@@ -40,6 +48,7 @@ const LOOKS: Record<string, KindLook> = {
     border: 'border-kind-poster/30',
     hover: 'hover:border-kind-poster/60 hover:from-kind-poster/20 hover:to-kind-poster/[0.08]',
     ring: 'ring-kind-poster/50',
+    ratio: '794 / 1123',
   },
   slides: {
     icon: Presentation,
@@ -49,6 +58,7 @@ const LOOKS: Record<string, KindLook> = {
     border: 'border-kind-slides/30',
     hover: 'hover:border-kind-slides/60 hover:from-kind-slides/20 hover:to-kind-slides/[0.08]',
     ring: 'ring-kind-slides/50',
+    ratio: '1600 / 900',
   },
   games: {
     icon: Gamepad2,
@@ -58,6 +68,7 @@ const LOOKS: Record<string, KindLook> = {
     border: 'border-kind-games/30',
     hover: 'hover:border-kind-games/60 hover:from-kind-games/20 hover:to-kind-games/[0.08]',
     ring: 'ring-kind-games/50',
+    ratio: '900 / 640',
   },
 }
 
@@ -69,6 +80,7 @@ const UNKNOWN: KindLook = {
   border: 'border-primary/30',
   hover: 'hover:border-primary/60 hover:from-primary/20 hover:to-primary/[0.08]',
   ring: 'ring-primary/50',
+  ratio: '4 / 3',
 }
 
 export function lookOf(kind: string | undefined): KindLook {
