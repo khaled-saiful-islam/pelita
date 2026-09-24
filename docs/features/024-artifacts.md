@@ -140,17 +140,71 @@ The forming card is the thing before it exists. Its proportions are the ones
 it chose, its ground is the first colour of its palette, its title is set in
 the display face it named (fetched from Google Fonts the moment it is
 named), and under that is the one sentence explaining why it looks like this
-— for a game, the loop: what the player will actually be doing. Light moves
-across it, because something is happening.
+— for a game, the loop: what the player will actually be doing.
 
 Nothing there is invented. Every value is one the artifact has already
 committed to, which is the point: what is on screen while you wait is the
 first true thing about what you are going to get.
 
+It has three states, because the build does:
+
+| | What is on the card | What it looks like |
+|---|---|---|
+| **reading** | Nothing is decided yet | Dark and unmarked, the kind's usual proportions, two rules holding the space the sentence will take. A low, cool light behind it. |
+| **designed** | The look arrived, all at once | Ground, ink and both faces cross-fade in over 700ms, and the card reshapes if this artifact chose a size of its own. The light comes up with the colour. |
+| **making** | The document is being written | The same look, more of everything: brighter light, faster. |
+
+Two light bands cross the card half a cycle apart, so one is always on it —
+a single band spends a third of its travel off the edge, and a card that
+goes still for a second reads as a card that has stopped. Behind it all, a
+warm shadow that breathes: the light the thing is being made under, and the
+one colour on screen that is not the artifact's own. None of it is a
+progress bar. Nothing here claims to know how far along anything is, because
+nothing here does.
+
 It replaced a row of colour swatches, which told you a palette had been
 chosen and nothing whatever about what was being made — and was shown for
 every kind, including a game, where five colours say less than the sentence
 above them.
+
+### A build outlives the connection watching it
+
+A build takes minutes, and for all of them the half-written answer exists
+only in the client: an artifact is stored once it is finished, and not
+before. So anything that broke the connection threw the work away — a
+reload, a browser suspending a socket held open on a backgrounded tab, a
+proxy's idle timeout, a flaky network. Coming back found the question with
+no answer under it.
+
+The turn no longer runs inside the request that asked for it. It runs in its
+own task, writes what it emits into a buffer, and connections *subscribe*
+(`app/services/live_turns.py`). A subscriber going away cancels the
+subscriber. Three things follow:
+
+- `POST /chat/stream` starts the turn and subscribes to it.
+- `GET /chat/live/{conversation_id}` picks up a turn already running,
+  replayed **from its first event** — so what comes back is the whole build,
+  not whatever is left of it. The client asks on the way into any
+  conversation, and 404 is the ordinary answer.
+- A dropped connection is retried three times with a backoff, as a *follow*
+  rather than a new turn. Only a refusal — the allowance ran out, the
+  session expired — stops it trying, because asking again would only be
+  refused again.
+
+A finished turn is deliberately not offered: its answer is in the database
+by then, and replaying it would draw a second copy of what is already on
+screen and count the cost twice.
+
+The client keeps the in-flight answer per conversation as well, so switching
+away and back is instant rather than a re-fetch. That buffer is a
+convenience; the server is the source of truth.
+
+One further thing had to be true for any of it to work: `load()` must be
+referentially stable. The page reloads the conversation in an effect keyed
+on it, and that effect calls `reset()` when the route names no conversation
+— which aborts the stream. A `load()` that changed identity on every render
+therefore killed the turn it had just started. `useChat.test.tsx` asserts
+the identity, because nothing about the transcript makes it visible.
 
 ### Each kind has a colour
 
@@ -406,6 +460,14 @@ documented failure of every implementation that has tried it.
   The poster's own words follow the conversation's language.
 - **No queue.** A second concurrent build on one worker competes for the same
   event loop.
+- **Running turns live in the process.** `LiveTurns`, like
+  `CancellationRegistry`, is in-memory: one worker. A restart ends every
+  build in flight, and to run several workers it needs a shared store and a
+  pub/sub channel. The interface is three methods and nothing outside the
+  file knows how it works.
+- **The build clock restarts when the page does.** The steps replay with the
+  server's own timings in them ("Composing 13.8 KB in 70s"), but the elapsed
+  counter in the header counts from when this browser started watching.
 - **The fit check runs in the browser, not at build time.** A poster that fails
   it is shown with a warning rather than automatically redrawn.
 - **A deck's slides are not fit-checked at all.** The poster's checks are

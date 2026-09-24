@@ -46,11 +46,16 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # The renderer holds a browser process; a reload that left one behind would
-    # leak one per restart.
+    # A turn now outlives the request that asked for it, so something has to
+    # end it: otherwise a reload leaves the model being polled for an answer
+    # nobody can receive, and the process will not exit until it finishes.
     from app.artifacts.raster import shutdown as close_renderer
     from app.db.session import engine
+    from app.services.live_turns import live_turns
 
+    await live_turns.close_all()
+    # The renderer holds a browser process; a reload that left one behind would
+    # leak one per restart.
     await close_renderer()
     await engine.dispose()
 

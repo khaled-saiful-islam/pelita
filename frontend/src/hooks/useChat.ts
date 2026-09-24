@@ -18,6 +18,14 @@ import {
   mergeTool,
 } from '@/lib/chat-events'
 import { splitStoredSources } from '@/lib/messages'
+import {
+  REJOINS,
+  openTurn,
+  pauseBefore,
+  refusalMessage,
+  wasAborted,
+  type Opening,
+} from '@/lib/turn'
 import type {
   Artifact,
   ArtifactBuild,
@@ -29,7 +37,6 @@ import type {
   Rating,
   SearchMode,
   StartPayload,
-  StreamBody,
   ToolActivity,
   Totals,
 } from '@/lib/chat-types'
@@ -202,51 +209,6 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setSuggestions([])
   }, [])
 
-  const load = useCallback(async (id: string) => {
-    // Deliberately does not abort. A build in another conversation keeps
-    // running so it finishes and is stored; coming back finds it there.
-    setError(null)
-    onScreenRef.current = id
-    const detail = await apiFetch<ConversationDetail>(`/conversations/${id}`)
-    setConversationId(detail.id)
-    setTitle(detail.title)
-    // Images and citations are stored in one table but render as very different
-    // things, so a reloaded conversation has to be split back apart.
-    const stored = detail.messages.map(splitStoredSources)
-    const live = parked.current.get(id)
-    setMessages(
-      live ? [...stored.filter((m) => m.id !== live.id), live] : stored,
-    )
-    setRatings(
-      Object.fromEntries(
-        Object.entries(detail.feedback ?? {}).map(([key, f]) => [key, f.rating]),
-      ),
-    )
-    setLanguage(detail.language)
-    setTotals(detail.totals)
-    // Chips are per-turn and not persisted.
-    setSuggestions([])
-    setStreaming(streamingForRef.current === id)
-    setOpenArtifact(null)
-
-    // Artifacts live in their own table, so a reload has to put the cards back.
-    // Wrapped because a conversation that loads without them is missing a card;
-    // a conversation that fails to load is missing everything.
-    try {
-      const made = await apiFetch<{ items: Artifact[] }>(`/conversations/${id}/artifacts`)
-      if (made.items.length) {
-        setMessages((current) =>
-          current.map((m) => {
-            const mine = made.items.filter((a) => a.message_id === m.id)
-            return mine.length ? { ...m, artifacts: mine } : m
-          }),
-        )
-      }
-    } catch {
-      // No cards rather than no conversation.
-    }
-  }, [])
-
   /**
    * Stop the response.
    *
@@ -291,8 +253,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
    * nothing happened.
    */
   const finished = useCallback(
-    async (conversation: string | null): Promise<boolean> => {
-      const id = assistantIdRef.current
+    async (conversation: string | null, id: string | null): Promise<boolean> => {
       if (!conversation || !id) return false
       for (const wait of [1200, 3000, 6000]) {
         await new Promise((go) => setTimeout(go, wait))
@@ -315,173 +276,284 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     [],
   )
 
-  /** The stream loop, shared by sending and regenerating. */
+  /**
+   * Follow a turn to its end — the one being started, or one already running.
+   *
+   * The loop is the point. A turn lives on the server now rather than inside
+   * the request that asked for it, so a connection going away is not the end
+   * of the work: a socket suspended on a backgrounded tab, a flaky network, a
+   * build that outlasts a proxy's idle timeout. Each attempt after the first
+   * asks to *follow* what is already running instead of starting anything,
+   * and the server replays it from its first event — so what comes back on
+   * screen is the whole build, not whatever happens to be left of it.
+   */
   const run = useCallback(
-    async (body: StreamBody, onStart: (start: StartPayload) => void) => {
+    async (opening: Opening, onStart: (start: StartPayload) => void) => {
       setError(null)
-      setStreaming(true)
       setSuggestions([])
       pendingToolsRef.current = []
       pendingGuardsRef.current = []
 
       const controller = new AbortController()
       abortRef.current = controller
-      streamingForRef.current = onScreenRef.current
+      // Claimed before the first await, so a second visit to this conversation
+      // cannot open a second reader of the same turn while this one is still
+      // connecting — which would deliver every token twice.
+      streamingForRef.current =
+        opening.kind === 'follow' ? opening.conversation : onScreenRef.current
+      // A follow waits for the server to confirm there is something to follow;
+      // a start disables the composer straight away.
+      if (opening.kind === 'start') setStreaming(true)
 
-      try {
-        const response = await fetch('/api/chat/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        })
+      let next = opening
+      let rejoins = 0
+      let lost: string | null = null
 
-        if (!response.ok || !response.body) {
-          throw new Error(await refusalMessage(response))
-        }
+      while (true) {
+        let refused = false
+        try {
+          const response = await openTurn(next, controller.signal)
+          // Nothing to follow: the ordinary answer for a conversation with no
+          // turn running in it, and not worth reporting to anyone.
+          if (response === null) break
 
-        for await (const frame of readSse(response.body, controller.signal)) {
-          dispatchFrame(frame, {
-            onStart: (start) => {
-              assistantIdRef.current = start.assistant_message_id
-              // A new chat has no id until now, so both refs learn it here —
-              // otherwise the first turn of a brand-new conversation would be
-              // treated as belonging to nothing and stop drawing.
-              if (streamingForRef.current === null) {
-                streamingForRef.current = start.conversation_id
-                onScreenRef.current = start.conversation_id
-              }
-              // Registered before anything is written to it, so leaving at any
-              // point after this finds something to come back to.
-              parked.current.set(start.conversation_id, {
-                ...newMessage(start.assistant_message_id, 'assistant', ''),
-                streaming: true,
-              })
-              setConversationId(start.conversation_id)
-              setTitle(start.title)
-              setLanguage(start.language)
-              onConversationStarted?.(start.conversation_id, start.title)
-              onStart(start)
-              flushPending(start.assistant_message_id)
-            },
-            onGuard: (alert) => {
-              const id = assistantIdRef.current
-              if (!id) {
-                pendingGuardsRef.current = [...pendingGuardsRef.current, alert]
-                return
-              }
-              answer((m) => ({ ...m, guards: [...(m.guards ?? []), alert] }))
-            },
-            onTool: (activity) => {
-              const id = assistantIdRef.current
-              if (!id) {
-                pendingToolsRef.current = mergeTool(pendingToolsRef.current, activity)
-                return
-              }
-              answer((m) => ({ ...m, tools: mergeTool(m.tools, activity) }))
-            },
-            onImages: (images) => patchActive({ images }),
-            onSources: (sources) => {
-              answer((m) => ({ ...m, sources: mergeSources(m.sources, sources) }))
-            },
-            onToken: (text) => {
-              answer((m) => ({ ...m, content: m.content + text }))
-            },
-            onUsage: (usage) => {
-              patchActive({
-                prompt_tokens: usage.prompt_tokens,
-                completion_tokens: usage.completion_tokens,
-                cost: usage.cost,
-                usage_source: usage.source,
-              })
-              // Rolled in rather than refetched: the server already said what
-              // this turn cost.
-              if (showing()) setTotals((current) => addUsage(current, usage))
-            },
-            onArtifactStart: (start) => {
-              if (showing()) setOpenArtifact(null)
-              patchActive({
-                building: { ...start, steps: [], source: '', parts: [], failed: null },
-              })
-            },
-            onArtifactStep: (step) => {
-              patchBuild((build) => ({ ...build, steps: mergeStep(build.steps, step) }))
-            },
-            onArtifactDelta: (text) => {
-              patchBuild((build) => ({ ...build, source: build.source + text }))
-            },
-            onArtifactPlan: (titles) => {
-              patchBuild((build) => ({ ...build, plan: titles }))
-            },
-            onArtifactDesign: (design) => {
-              // The shape is kept beside the look rather than inside it: the
-              // panel asks for the artifact's proportions, not its palette.
-              patchBuild((build) => ({
-                ...build,
-                design,
-                width: design.width || build.width,
-                height: design.height || build.height,
-              }))
-            },
-            onArtifactPart: (part) => {
-              patchBuild((build) => ({ ...build, parts: mergePart(build.parts, part) }))
-            },
-            onArtifactDone: (artifact) => {
-              answer((m) => ({
-                ...m,
-                building: null,
-                artifacts: [...(m.artifacts ?? []), artifact],
-              }))
-              // Opened as soon as it exists, and bumped either way: an edit
-              // keeps the same id, so this is what tells the panel to look
-              // again.
-              // Only opened for somebody who is here to see it. A build that
-              // finished while they were reading something else is waiting in
-              // its own conversation, not thrown at the one they are in.
-              if (showing()) {
-                setOpenArtifact(artifact.id)
-                setArtifactRevision((n) => n + 1)
-              }
-            },
-            onArtifactFailed: (failure) => {
-              patchBuild((build) => ({ ...build, failed: failure.message }))
-            },
-            onSuggestions: (chips: string[]) => {
-              if (showing()) setSuggestions(chips)
-            },
-            onError: (message) => {
-              setError(message)
-              patchActive({ error: message })
-            },
-            onDone: (finishReason) =>
-              patchActive({ streaming: false, finish_reason: finishReason }),
-          })
-        }
-      } catch (err) {
-        // An abort is the stop button working, not a failure.
-        if (!(err instanceof DOMException && err.name === 'AbortError')) {
-          // The connection going away does not mean the turn did. A build runs
-          // for minutes, and a browser will suspend a connection that old on a
-          // backgrounded tab — `ERR_NETWORK_IO_SUSPENDED` — while the server
-          // carries on and stores the result. Reported as an error, that is a
-          // scary message in front of work that actually succeeded, which a
-          // refresh then reveals. So ask the server before saying anything.
-          const recovered = await finished(streamingForRef.current)
-          if (!recovered) {
-            setError(err instanceof Error ? err.message : 'Could not reach the server.')
+          if (!response.ok || !response.body) {
+            refused = true
+            throw new Error(await refusalMessage(response))
           }
+          lost = null
+          setStreaming(showing())
+
+          for await (const frame of readSse(response.body, controller.signal)) {
+            dispatchFrame(frame, {
+              onStart: (start) => {
+                assistantIdRef.current = start.assistant_message_id
+                // A new chat has no id until now, so both refs learn it here —
+                // otherwise the first turn of a brand-new conversation would be
+                // treated as belonging to nothing and stop drawing.
+                if (streamingForRef.current === null) {
+                  streamingForRef.current = start.conversation_id
+                  onScreenRef.current = start.conversation_id
+                }
+                // A blank answer, every time this event arrives. Following a
+                // turn replays it from the beginning, so starting from whatever
+                // is already there would write the answer out twice.
+                const blank: ChatMessage = {
+                  ...newMessage(start.assistant_message_id, 'assistant', ''),
+                  streaming: true,
+                }
+                // Registered before anything is written to it, so leaving at any
+                // point after this finds something to come back to.
+                parked.current.set(start.conversation_id, blank)
+                if (showing()) {
+                  setMessages((current) =>
+                    current.some((m) => m.id === blank.id)
+                      ? current.map((m) => (m.id === blank.id ? blank : m))
+                      : [...current, blank],
+                  )
+                }
+                setConversationId(start.conversation_id)
+                setTitle(start.title)
+                setLanguage(start.language)
+                onConversationStarted?.(start.conversation_id, start.title)
+                onStart(start)
+                flushPending(start.assistant_message_id)
+              },
+              onGuard: (alert) => {
+                const id = assistantIdRef.current
+                if (!id) {
+                  pendingGuardsRef.current = [...pendingGuardsRef.current, alert]
+                  return
+                }
+                answer((m) => ({ ...m, guards: [...(m.guards ?? []), alert] }))
+              },
+              onTool: (activity) => {
+                const id = assistantIdRef.current
+                if (!id) {
+                  pendingToolsRef.current = mergeTool(pendingToolsRef.current, activity)
+                  return
+                }
+                answer((m) => ({ ...m, tools: mergeTool(m.tools, activity) }))
+              },
+              onImages: (images) => patchActive({ images }),
+              onSources: (sources) => {
+                answer((m) => ({ ...m, sources: mergeSources(m.sources, sources) }))
+              },
+              onToken: (text) => {
+                answer((m) => ({ ...m, content: m.content + text }))
+              },
+              onUsage: (usage) => {
+                patchActive({
+                  prompt_tokens: usage.prompt_tokens,
+                  completion_tokens: usage.completion_tokens,
+                  cost: usage.cost,
+                  usage_source: usage.source,
+                })
+                // Rolled in rather than refetched: the server already said what
+                // this turn cost.
+                if (showing()) setTotals((current) => addUsage(current, usage))
+              },
+              onArtifactStart: (start) => {
+                if (showing()) setOpenArtifact(null)
+                patchActive({
+                  building: { ...start, steps: [], source: '', parts: [], failed: null },
+                })
+              },
+              onArtifactStep: (step) => {
+                patchBuild((build) => ({ ...build, steps: mergeStep(build.steps, step) }))
+              },
+              onArtifactDelta: (text) => {
+                patchBuild((build) => ({ ...build, source: build.source + text }))
+              },
+              onArtifactPlan: (titles) => {
+                patchBuild((build) => ({ ...build, plan: titles }))
+              },
+              onArtifactDesign: (design) => {
+                // The shape is kept beside the look rather than inside it: the
+                // panel asks for the artifact's proportions, not its palette.
+                patchBuild((build) => ({
+                  ...build,
+                  design,
+                  width: design.width || build.width,
+                  height: design.height || build.height,
+                }))
+              },
+              onArtifactPart: (part) => {
+                patchBuild((build) => ({ ...build, parts: mergePart(build.parts, part) }))
+              },
+              onArtifactDone: (artifact) => {
+                answer((m) => ({
+                  ...m,
+                  building: null,
+                  artifacts: [...(m.artifacts ?? []), artifact],
+                }))
+                // Opened as soon as it exists, and bumped either way: an edit
+                // keeps the same id, so this is what tells the panel to look
+                // again.
+                // Only opened for somebody who is here to see it. A build that
+                // finished while they were reading something else is waiting in
+                // its own conversation, not thrown at the one they are in.
+                if (showing()) {
+                  setOpenArtifact(artifact.id)
+                  setArtifactRevision((n) => n + 1)
+                }
+              },
+              onArtifactFailed: (failure) => {
+                patchBuild((build) => ({ ...build, failed: failure.message }))
+              },
+              onSuggestions: (chips: string[]) => {
+                if (showing()) setSuggestions(chips)
+              },
+              onError: (message) => {
+                setError(message)
+                patchActive({ error: message })
+              },
+              onDone: (finishReason) =>
+                patchActive({ streaming: false, finish_reason: finishReason }),
+            })
+          }
+          break
+        } catch (err) {
+          // An abort is the stop button working, or this tab going away. Not a
+          // failure, and nothing to recover.
+          if (wasAborted(err)) break
+          lost = err instanceof Error ? err.message : 'Could not reach the server.'
+          const conversation = streamingForRef.current
+          // A refusal is an answer, not a dropped connection: the allowance ran
+          // out, or the session expired. Asking again would only be refused.
+          if (refused || !conversation || rejoins >= REJOINS) break
+          await new Promise((go) => setTimeout(go, pauseBefore(rejoins)))
+          rejoins += 1
+          next = { kind: 'follow', conversation }
         }
-        patchActive({ streaming: false })
-      } finally {
-        if (showing()) setStreaming(false)
-        if (streamingForRef.current) parked.current.delete(streamingForRef.current)
-        streamingForRef.current = null
-        abortRef.current = null
-        assistantIdRef.current = null
       }
+
+      const conversation = streamingForRef.current
+      const assistant = assistantIdRef.current
+      patchActive({ streaming: false })
+      if (showing()) setStreaming(false)
+      streamingForRef.current = null
+      abortRef.current = null
+      assistantIdRef.current = null
+
+      if (lost !== null) {
+        // Out of rejoins. The turn may still have finished while we were
+        // failing to reach it — a build runs for minutes, and the server
+        // stores what it made whether or not anyone is connected. Reported as
+        // an error, that is a frightening message in front of work that
+        // actually succeeded, which a refresh then reveals. So ask first.
+        const recovered = await finished(conversation, assistant)
+        if (!recovered) setError(lost)
+      }
+      if (conversation) parked.current.delete(conversation)
     },
     [onConversationStarted, patch, patchActive, flushPending, showing, answer, finished],
   )
+
+  // `run` is rebuilt whenever anything it closes over changes, which is most
+  // renders. `load` is a dependency of an effect in the page that resets the
+  // chat when it fires with no conversation — so a `load` that changed with
+  // `run` made that effect re-run, and the reset aborted the stream this hook
+  // had just started. Reaching `run` through a ref keeps `load` stable, and
+  // the effect fires when the route changes and at no other time.
+  const latestRun = useRef(run)
+  latestRun.current = run
+
+  const load = useCallback(async (id: string) => {
+    // Deliberately does not abort. A build in another conversation keeps
+    // running so it finishes and is stored; coming back finds it there.
+    setError(null)
+    onScreenRef.current = id
+    const detail = await apiFetch<ConversationDetail>(`/conversations/${id}`)
+    setConversationId(detail.id)
+    setTitle(detail.title)
+    // Images and citations are stored in one table but render as very different
+    // things, so a reloaded conversation has to be split back apart.
+    const stored = detail.messages.map(splitStoredSources)
+    const live = parked.current.get(id)
+    setMessages(
+      live ? [...stored.filter((m) => m.id !== live.id), live] : stored,
+    )
+    setRatings(
+      Object.fromEntries(
+        Object.entries(detail.feedback ?? {}).map(([key, f]) => [key, f.rating]),
+      ),
+    )
+    setLanguage(detail.language)
+    setTotals(detail.totals)
+    // Chips are per-turn and not persisted.
+    setSuggestions([])
+    setStreaming(streamingForRef.current === id)
+    setOpenArtifact(null)
+
+    // Whatever this conversation is in the middle of. The server holds the
+    // turn, not the connection that asked for it, so a build that was running
+    // when the page was closed — or when the connection dropped, or when the
+    // person walked away for ten minutes — is still running and can be picked
+    // up from its first event. Unless this tab is already the one reading it,
+    // in which case following it again would draw everything twice.
+    if (streamingForRef.current === null) {
+      void latestRun.current({ kind: 'follow', conversation: id }, () => {})
+    }
+
+    // Artifacts live in their own table, so a reload has to put the cards back.
+    // Wrapped because a conversation that loads without them is missing a card;
+    // a conversation that fails to load is missing everything.
+    try {
+      const made = await apiFetch<{ items: Artifact[] }>(`/conversations/${id}/artifacts`)
+      if (made.items.length) {
+        setMessages((current) =>
+          current.map((m) => {
+            const mine = made.items.filter((a) => a.message_id === m.id)
+            return mine.length ? { ...m, artifacts: mine } : m
+          }),
+        )
+      }
+    } catch {
+      // No cards rather than no conversation.
+    }
+  }, [])
+
 
   const send = useCallback(
     async (content: string, options?: SendOptions) => {
@@ -498,18 +570,23 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
 
       await run(
         {
-          conversation_id: conversationId,
-          content: trimmed,
-          search_mode: options?.searchMode ?? 'auto',
-          artifact_id: options?.artifactId ?? null,
+          kind: 'start',
+          body: {
+            conversation_id: conversationId,
+            content: trimmed,
+            search_mode: options?.searchMode ?? 'auto',
+            artifact_id: options?.artifactId ?? null,
+          },
         },
         (start) => {
           // The optimistic message takes the server's real id, so anything that
           // later addresses it — a rating, an export, a reload — matches. The
           // files move with it: the server bound them to this same id in the
-          // transaction that saved the question.
-          setMessages((current) => [
-            ...current.map((m) =>
+          // transaction that saved the question. The answer's own row is put up
+          // by the shared handler, which has to do it for a turn picked up
+          // later too.
+          setMessages((current) =>
+            current.map((m) =>
               m.id === provisionalId
                 ? {
                     ...m,
@@ -521,8 +598,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
                   }
                 : m,
             ),
-            { ...newMessage(start.assistant_message_id, 'assistant', ''), streaming: true },
-          ])
+          )
           options?.onSent?.(start.user_message_id)
         },
       )
@@ -547,7 +623,7 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
         sources: undefined,
         images: undefined,
       })
-      await run({ regenerate_of: assistantMessageId }, () => {})
+      await run({ kind: 'start', body: { regenerate_of: assistantMessageId } }, () => {})
     },
     [streaming, run, patch],
   )
@@ -595,24 +671,6 @@ export function useChat(onConversationStarted?: (id: string, title: string) => v
     setOpenArtifact,
     artifactRevision,
   }
-}
-
-/**
- * Why the server would not start the turn.
- *
- * The body carries the actual reason — which allowance ran out, how much was
- * used — and "the server refused the request (429)" throws all of that away at
- * exactly the moment someone needs it.
- */
-async function refusalMessage(response: Response): Promise<string> {
-  if (response.status === 401) return 'Your session expired. Sign in again.'
-  try {
-    const body = (await response.json()) as { error?: { message?: string } }
-    if (body?.error?.message) return body.error.message
-  } catch {
-    // Not our envelope — a proxy error page, say.
-  }
-  return `The server refused the request (${response.status}).`
 }
 
 function newMessage(id: string, role: 'user' | 'assistant', content: string): ChatMessage {

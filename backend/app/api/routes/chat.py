@@ -18,7 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import ChatServiceDep, CurrentUser, SessionDep, limit_chat
 from app.api.schemas.chat import FeedbackRequest, FeedbackResponse, SendMessageRequest
-from app.core.errors import PelitaError
+from app.core.errors import NotFoundError
 from app.services.events import (
     AccountingEvent,
     ArtifactDeltaEvent,
@@ -29,6 +29,7 @@ from app.services.events import (
     ArtifactPlanEvent,
     ArtifactStartEvent,
     ArtifactStepEvent,
+    ChatEvent,
     DeltaEvent,
     DoneEvent,
     ErrorEvent,
@@ -40,6 +41,7 @@ from app.services.events import (
     ToolEvent,
 )
 from app.services.feedback_service import FeedbackService
+from app.services.live_turns import live_turns
 
 logger = logging.getLogger(__name__)
 
@@ -209,43 +211,68 @@ def _to_sse(event: object) -> dict[str, str] | None:
             return None
 
 
+async def _frames(events: AsyncIterator[ChatEvent]) -> AsyncIterator[dict[str, str]]:
+    """One subscriber's view of a turn, as SSE frames."""
+    async for event in events:
+        frame = _to_sse(event)
+        if frame is not None:
+            yield frame
+
+
 @router.post("/stream", dependencies=[Depends(limit_chat)])
 async def stream(
     payload: SendMessageRequest,
     chat: ChatServiceDep,
     user: CurrentUser,
 ) -> EventSourceResponse:
-    """Stream a turn.
+    """Start a turn, and follow it.
 
-    Disconnect handling is left entirely to `EventSourceResponse`, which listens
-    on the ASGI receive channel and cancels this generator when the client goes
-    away. Calling `request.is_disconnected()` in here as well puts two readers on
-    the same channel: whichever consumes `http.disconnect` first wins, the
-    response never finishes its chunked encoding, and the browser reports
-    ERR_INCOMPLETE_CHUNKED_ENCODING after rendering a complete answer. curl does
-    not mind, which is what makes it easy to ship.
+    The turn itself is started in `live_turns` rather than driven from here,
+    so this response is a *subscriber* to it. That is the whole difference
+    between a build that survives a reload and one that does not: when the
+    client goes away, `EventSourceResponse` cancels this generator — the
+    subscription — while the turn carries on, finishes, and stores what it
+    made. `GET /chat/live/{conversation_id}` picks it back up.
+
+    Disconnect handling is left entirely to `EventSourceResponse`, which
+    listens on the ASGI receive channel. Calling `request.is_disconnected()`
+    in here as well puts two readers on the same channel: whichever consumes
+    `http.disconnect` first wins, the response never finishes its chunked
+    encoding, and the browser reports ERR_INCOMPLETE_CHUNKED_ENCODING after
+    rendering a complete answer. curl does not mind, which is what makes it
+    easy to ship.
     """
+    turn = live_turns.begin(
+        user_id=user.id,
+        source=chat.stream_turn(
+            user_id=user.id,
+            conversation_id=payload.conversation_id,
+            content=payload.content,
+            regenerate_of=payload.regenerate_of,
+            search_mode=payload.search_mode,
+            artifact_id=payload.artifact_id,
+        ),
+    )
+    return EventSourceResponse(_frames(turn.follow()), ping=15)
 
-    async def publish() -> AsyncIterator[dict[str, str]]:
-        try:
-            async for event in chat.stream_turn(
-                user_id=user.id,
-                conversation_id=payload.conversation_id,
-                content=payload.content,
-                regenerate_of=payload.regenerate_of,
-                search_mode=payload.search_mode,
-                artifact_id=payload.artifact_id,
-            ):
-                frame = _to_sse(event)
-                if frame is not None:
-                    yield frame
-        except PelitaError as exc:
-            # The response has already begun, so an HTTP status is no longer
-            # available. The error arrives as an event instead.
-            yield {"event": "error", "data": json.dumps({"message": exc.message})}
-            yield {"event": "done", "data": json.dumps({"finish_reason": "error"})}
 
-    return EventSourceResponse(publish(), ping=15)
+@router.get("/live/{conversation_id}")
+async def live(conversation_id: UUID, user: CurrentUser) -> EventSourceResponse:
+    """Follow a turn that is already running in this conversation.
+
+    Replayed from its first event, so a client that has just arrived sees the
+    whole thing — the steps already taken, the design already chosen, the
+    slides already written — and then the rest as it happens. That is what
+    makes leaving mid-build and coming back, or reloading the page, show the
+    work instead of an empty conversation.
+
+    404 when nothing is running, which is the ordinary case and not an error
+    worth showing anyone.
+    """
+    turn = live_turns.find(conversation_id, user.id)
+    if turn is None:
+        raise NotFoundError("Nothing is being generated in this conversation.")
+    return EventSourceResponse(_frames(turn.follow()), ping=15)
 
 
 @router.post("/messages/{message_id}/stop", status_code=status.HTTP_204_NO_CONTENT)
