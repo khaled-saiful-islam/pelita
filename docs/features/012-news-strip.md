@@ -2,10 +2,33 @@
 
 ## What it does
 
-Headlines above the composer on the new-chat screen, chosen from what you have
-been asking about. Cards open in a new tab; arrows scroll the row. Pulled from
-an MCP server, cached in Postgres for 30 minutes. If anything fails, the strip
-is hidden and chat is untouched.
+A briefing across the top of the new-chat screen, chosen from what you have
+been asking about. One story leads at a time, set large, in a card tinted by its
+source, and the next turns in every few seconds with the next three waiting
+beside it. Every story can become a conversation: **Ask Pelita about this**
+writes the headline into the box. Pulled from an MCP server, cached in Postgres
+for 30 minutes. If anything fails, the briefing is hidden and chat is untouched.
+
+### Why a briefing and not a row of cards
+
+A strip of six identical grey cards, above the composer and then at the top of
+the screen, read as something that had wandered in from another page, and
+nothing on it asked to be touched. So:
+
+- **One story at a time.** A serif headline, its source and when; the card's
+  tint drifts to each source's colour as the stories turn (`--hue` is a
+  registered property, so it eases rather than snaps). The current story's dot
+  stretches and fills while it leads.
+- **The next three are beside it**, and choosing one makes it the lead.
+- **Pointing at it, or tabbing into it, holds the story showing.** With reduced
+  motion it never turns on its own.
+- **Ask Pelita about this** is the point of news in a chat app. It writes
+  "Tell me more about this story from ...: <headline>" into the box without
+  sending, because they may want to ask something narrower.
+- **Dates read like dates.** Recent is relative ("3h ago"); past a week it is
+  "Jul 7", with the year only when it is not this one -- the topic-chosen feed
+  can be months old, and "437d ago" is arithmetic, not an answer.
+- The feed's snippet repeats the headline and a link, so it is not shown.
 
 ## How it works
 

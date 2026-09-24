@@ -843,3 +843,197 @@
       transform: none;
     }
   }
+
+  /* --- In the news --------------------------------------------------------
+     One story at a time, in a card tinted by its source. `--hue` is
+     registered so the tint drifts from one source's colour to the next as
+     the stories turn, instead of snapping. */
+
+  @property --hue {
+    syntax: '<number>';
+    inherits: true;
+    initial-value: 30;
+  }
+
+  .news-brief {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid hsl(var(--hue) 45% 50% / 0.18);
+    border-radius: 18px;
+    background:
+      radial-gradient(
+        120% 140% at 0% 0%,
+        hsl(var(--hue) 75% 55% / 0.11),
+        transparent 55%
+      ),
+      radial-gradient(
+        90% 120% at 100% 100%,
+        hsl(calc(var(--hue) + 40) 70% 55% / 0.07),
+        transparent 60%
+      ),
+      hsl(var(--surface));
+    padding: 12px 14px 14px;
+    box-shadow: 0 1px 2px hsl(var(--hue) 30% 20% / 0.05);
+    transition:
+      --hue 1.2s ease,
+      box-shadow 240ms ease,
+      border-color 240ms ease;
+  }
+
+  .news-brief:hover {
+    border-color: hsl(var(--hue) 50% 50% / 0.3);
+    box-shadow: 0 14px 34px -22px hsl(var(--hue) 60% 35% / 0.55);
+  }
+
+  /* A slow pulse: this is today, not an archive. */
+  @keyframes news-pulse {
+    0% {
+      box-shadow: 0 0 0 0 hsl(0 80% 55% / 0.55);
+    }
+    70% {
+      box-shadow: 0 0 0 7px hsl(0 80% 55% / 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 hsl(0 80% 55% / 0);
+    }
+  }
+
+  .news-live {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: hsl(0 78% 54%);
+    animation: news-pulse 2s ease-out infinite;
+  }
+
+  /* The dots: the current one stretches and fills while its story leads. */
+  .news-dot {
+    position: relative;
+    width: 6px;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: hsl(var(--muted-foreground) / 0.3);
+    transition:
+      width 320ms cubic-bezier(0.22, 1, 0.36, 1),
+      background 200ms ease;
+  }
+
+  .news-dot:hover {
+    background: hsl(var(--muted-foreground) / 0.55);
+  }
+
+  .news-dot[data-on='true'] {
+    width: 22px;
+    background: hsl(var(--hue) 40% 50% / 0.22);
+  }
+
+  @keyframes news-fill {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  .news-dot-fill {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: hsl(var(--hue) 60% 45%);
+    transform-origin: left;
+    animation: news-fill linear forwards;
+  }
+
+  .news-dot-fill[data-held='true'] {
+    animation-play-state: paused;
+  }
+
+  /* A story arriving: up and in, the headline a beat after its source. */
+  @keyframes news-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .news-lead > * {
+    animation: news-in 520ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  .news-lead > :nth-child(2) {
+    animation-delay: 60ms;
+  }
+
+  .news-lead > :nth-child(3) {
+    animation-delay: 120ms;
+  }
+
+  .news-headline {
+    display: -webkit-box;
+    color: hsl(var(--foreground));
+    background-image: linear-gradient(currentColor, currentColor);
+    background-position: 0 100%;
+    background-repeat: no-repeat;
+    background-size: 0% 1.5px;
+    transition: background-size 380ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .news-headline:hover,
+  .news-headline:focus-visible {
+    background-size: 100% 1.5px;
+    outline: none;
+  }
+
+  /* The reason a headline belongs in a chat app: ask about it. */
+  .news-ask {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    background: hsl(var(--foreground));
+    color: hsl(var(--background));
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    transition:
+      transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 200ms ease,
+      background 200ms ease;
+  }
+
+  .news-ask:hover,
+  .news-ask:focus-visible {
+    transform: translateY(-1px);
+    background: hsl(var(--hue) 55% 38%);
+    box-shadow: 0 8px 18px -10px hsl(var(--hue) 60% 30% / 0.8);
+    outline: none;
+  }
+
+  .news-next {
+    transition: background 180ms ease;
+  }
+
+  .news-next:hover,
+  .news-next:focus-visible {
+    background: hsl(var(--hue) 50% 50% / 0.08);
+    outline: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .news-live,
+    .news-lead > *,
+    .news-dot-fill {
+      animation: none;
+    }
+
+    .news-brief {
+      transition: none;
+    }
+  }

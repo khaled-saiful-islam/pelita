@@ -177,7 +177,13 @@ export default function Chat() {
             {/* The news leads now, at the top, and what can be made sits
                 where the decision is — right above the box. */}
             <div className="pt-3">
-              <NewsStrip />
+              <NewsStrip
+                onAsk={(headline, source) =>
+                  // Written into the box, not sent: they may want to ask
+                  // something narrower than "tell me more".
+                  composer.current?.fill(`Tell me more about this story from ${source}: "${headline}"`)
+                }
+              />
             </div>
             <EmptyState canMake={kinds.length > 0} />
           </>

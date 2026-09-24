@@ -72,7 +72,7 @@ default.
 | **Tool calling** | The model picks its own tools and can run several in a turn — two questions, two searches. Falls back to pattern matching on providers without function calling |
 | **Attached files** | Text, PDF and Word files — three per chat, 5 MB each. Each appears as a card on the message that sent it, and stays readable for the rest of the chat |
 | **Image understanding** | Attach a photo, screenshot or scan and ask about it. Needs a vision model; off until you set `VISION_MODEL` |
-| **News strip** | Headlines on the new-chat screen, pulled from an MCP server via the official Python SDK and cached for 30 minutes |
+| **News briefing** | Across the top of the new-chat screen: one story at a time in a card tinted by its source, the next three beside it, and **Ask Pelita about this** to turn a headline into a conversation. Pulled from an MCP server via the official Python SDK and cached for 30 minutes |
 | **Token and cost accounting** | Per message and per conversation, labelled as provider-reported or estimated so a total is never quietly a guess |
 | **Language auto-detection** | Replies in the language of your first message. Verified for Bahasa Melayu, English, Tamil, Chinese and Bengali |
 | **Memory** | Facts that persist across conversations, added by you or extracted as you talk — all editable and deletable |
