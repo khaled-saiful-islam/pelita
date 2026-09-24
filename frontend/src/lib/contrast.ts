@@ -76,3 +76,42 @@ export function accentOn(background: string, ink: string, palette: string[]): st
   }
   return score >= 3 ? best : ink
 }
+
+function rgb(hex: string): [number, number, number] | null {
+  const cleaned = hex.replace('#', '')
+  const full = cleaned.length === 3 ? cleaned.split('').map((c) => c + c).join('') : cleaned
+  const n = Number.parseInt(full.slice(0, 6), 16)
+  if (!Number.isFinite(n) || full.length < 6) return null
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+/**
+ * The palette's most vivid colour, or null when it has none.
+ *
+ * For light rather than text: the glow behind an artifact being made is lit in
+ * its own theme, and the colour that says "this one" is the saturated one —
+ * the vermilion, not the navy ground or the cream ink. Near-greys and colours
+ * too close to black or white carry no hue worth glowing in, so a palette of
+ * only those gives none.
+ */
+export function vividOf(palette: string[]): string | null {
+  let best: string | null = null
+  let score = 0
+  for (const colour of palette) {
+    const channels = rgb(colour)
+    if (!channels) continue
+    const [r, g, b] = channels.map((v) => v / 255)
+    const max = Math.max(r, g, b)
+    const min = Math.min(r, g, b)
+    const light = (max + min) / 2
+    const chroma = max - min
+    // Chroma weighted towards the middle of the lightness range, where a
+    // colour reads as a colour rather than as almost-black or almost-white.
+    const weight = chroma * (1 - Math.abs(light - 0.5) * 1.4)
+    if (weight > score) {
+      best = colour
+      score = weight
+    }
+  }
+  return score >= 0.18 ? best : null
+}

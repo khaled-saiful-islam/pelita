@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { lookOf } from '@/components/artifacts/kind-look'
 import type { ArtifactBuild } from '@/lib/chat-types'
-import { accentOn, readableOn } from '@/lib/contrast'
+import { accentOn, readableOn, vividOf } from '@/lib/contrast'
 
 /**
  * The artifact, before it exists.
@@ -55,7 +55,15 @@ export function Forming({ build }: { build: ArtifactBuild }) {
     build.width && build.height ? `${build.width} / ${build.height}` : kind.ratio
 
   return (
-    <div className="forming-stage relative mx-auto w-full max-w-md" data-phase={phase}>
+    <div
+      className="forming-stage relative mx-auto w-full max-w-md"
+      data-phase={phase}
+      // Lit in its own theme: the kind's colour while nothing is decided, then
+      // the most vivid colour of the palette it chose. A fixed amber behind a
+      // navy-and-vermilion poster was the one colour on screen that had
+      // nothing to do with it.
+      style={{ ['--glow' as string]: glowOf(build.kind, design?.palette) }}
+    >
       {/* The light it is being made under. Warm on purpose, and the one colour
           here that is not the artifact's own — it belongs to the workshop, not
           to the thing on the bench. */}
@@ -120,6 +128,13 @@ export function Forming({ build }: { build: ArtifactBuild }) {
       </div>
     </div>
   )
+}
+
+function glowOf(kind: string, palette?: string[]): string {
+  const vivid = palette ? vividOf(palette) : null
+  if (vivid) return vivid
+  const known = ['poster', 'slides', 'games', 'website', 'app']
+  return known.includes(kind) ? `hsl(var(--kind-${kind}))` : 'hsl(var(--primary))'
 }
 
 /**
