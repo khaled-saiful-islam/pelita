@@ -17,6 +17,7 @@ const PATIENCE: Record<string, string> = {
   games: 'A game takes a couple of minutes. It is played in a browser before you see it.',
   website:
     'A website takes a few minutes. Every page is written on its own, then opened on a desktop and a phone before you see it.',
+  app: 'An app takes a couple of minutes. It is used in a browser — typed into, its buttons pressed — before you see it.',
 }
 
 export function BuildSteps({ build }: { build: ArtifactBuild }) {

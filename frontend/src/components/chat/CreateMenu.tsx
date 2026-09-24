@@ -27,6 +27,7 @@ const OPENINGS: Record<string, string> = {
   slides: 'Make a slide deck about ',
   games: 'Build a game: ',
   website: 'Build a website for ',
+  app: 'Build an app that ',
 }
 
 export function CreateMenu({

@@ -11,10 +11,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.artifact import Artifact, ArtifactVersion
+from app.db.models.artifact_state import ArtifactState
 
 
 class SqlArtifactRepository:
@@ -135,3 +137,36 @@ class SqlArtifactRepository:
     async def bind_to_message(self, artifact: Artifact, message_id: UUID) -> None:
         artifact.message_id = message_id
         await self._session.flush()
+
+    # -- what an app remembers ---------------------------------------------
+
+    async def state(self, artifact_id: UUID, user_id: UUID) -> Any | None:
+        """What this person's copy of the app last saved, or None."""
+        row = (
+            await self._session.execute(
+                select(ArtifactState.data).where(
+                    ArtifactState.artifact_id == artifact_id, ArtifactState.user_id == user_id
+                )
+            )
+        ).scalar_one_or_none()
+        return row
+
+    async def save_state(self, artifact_id: UUID, user_id: UUID, data: Any) -> None:
+        """Overwrite it. One row per app per person, written in one statement,
+        so two saves racing each other cannot leave two rows behind."""
+        statement = insert(ArtifactState).values(
+            artifact_id=artifact_id, user_id=user_id, data=data
+        )
+        await self._session.execute(
+            statement.on_conflict_do_update(
+                constraint="uq_artifact_states_artifact_user",
+                set_={"data": statement.excluded.data, "updated_at": func.clock_timestamp()},
+            )
+        )
+
+    async def clear_state(self, artifact_id: UUID, user_id: UUID) -> None:
+        await self._session.execute(
+            delete(ArtifactState).where(
+                ArtifactState.artifact_id == artifact_id, ArtifactState.user_id == user_id
+            )
+        )

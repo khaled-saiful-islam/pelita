@@ -26,6 +26,8 @@ export function SiteFrame({
   page,
   onPage,
   onEdit,
+  onStore,
+  fit = false,
 }: {
   html: string
   sandbox: string
@@ -37,6 +39,10 @@ export function SiteFrame({
   onPage?: (slug: string) => void
   /** Present while editing: the words become editable and report changes. */
   onEdit?: (index: number, text: string) => void
+  /** What an app asked to keep, as JSON text. */
+  onStore?: (text: string) => void
+  /** Laid out at the panel's own width on a desktop: an app is used here. */
+  fit?: boolean
 }) {
   const box = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -69,11 +75,13 @@ export function SiteFrame({
         onPage?.(data.page)
       } else if (data?.source === 'pelita-edit' && typeof data.index === 'number') {
         onEdit?.(data.index, data.text ?? '')
+      } else if (data?.source === 'pelita-store' && typeof (data as { data?: unknown }).data === 'string') {
+        onStore?.((data as { data: string }).data)
       }
     }
     window.addEventListener('message', listen)
     return () => window.removeEventListener('message', listen)
-  }, [onPage, onEdit])
+  }, [onPage, onEdit, onStore])
 
   // Asked for a page the site is not already showing: say so.
   useEffect(() => {
@@ -89,7 +97,7 @@ export function SiteFrame({
   const handheld = device !== 'desktop'
   // A phone and a tablet sit inside a bezel, which takes its share of the room.
   const bezel = handheld ? 14 : 0
-  const layout = siteLayout(device, Math.max(0, room.width - bezel))
+  const layout = siteLayout(device, Math.max(0, room.width - bezel), fit)
   const inner = Math.max(0, room.height - bezel)
   // Taller than the room by the scale, so that once shrunk it fills it.
   const height = layout.scale > 0 ? inner / layout.scale : 0

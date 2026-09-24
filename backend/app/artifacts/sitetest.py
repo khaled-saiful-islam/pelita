@@ -229,7 +229,21 @@ async def _run(
     )
 
 
-async def _open(context: Any, html: str, errors: list[str], blocked: list[str]) -> Any:
+async def open_page(
+    context: Any,
+    html: str,
+    errors: list[str],
+    blocked: list[str],
+    dialogs: list[str] | None = None,
+) -> Any:
+    """A page with the document in it, listening for what goes wrong.
+
+    Every request is refused but the two faces the prompt asks for and the
+    document's own data URIs. A dialog -- `alert`, `confirm`, `prompt` -- is
+    dismissed and, when asked, recorded: they are blocked in the frame the
+    document is shown in, so one here is a question nobody will ever be
+    asked.
+    """
     page = await context.new_page()
 
     def thrown(exc: Any) -> None:
@@ -252,8 +266,14 @@ async def _open(context: Any, html: str, errors: list[str], blocked: list[str]) 
             blocked.append(url[:120])
         await route.abort()
 
+    async def dialog(opened: Any) -> None:
+        if dialogs is not None:
+            dialogs.append(str(opened.type))
+        await opened.dismiss()
+
     page.on("pageerror", thrown)
     page.on("console", console)
+    page.on("dialog", dialog)
     await page.route("**/*", refuse)
     await page.set_content(html, wait_until="load", timeout=LOAD_TIMEOUT_MS)
     await page.wait_for_timeout(SETTLE_MS)
@@ -264,7 +284,7 @@ async def _weigh(
     context: Any, html: str, slugs: list[str], errors: list[str], blocked: list[str]
 ) -> tuple[list[str], list[str]]:
     """Every page at desktop width: is it there, and is there anything on it."""
-    page = await _open(context, html, errors, blocked)
+    page = await open_page(context, html, errors, blocked)
     missing: list[str] = []
     empty: list[str] = []
     for slug in slugs:
@@ -282,7 +302,7 @@ async def _measure(
     context: Any, html: str, slugs: list[str], errors: list[str], blocked: list[str]
 ) -> list[Wide]:
     """Every page at phone width, against the edge of the screen."""
-    page = await _open(context, html, errors, blocked)
+    page = await open_page(context, html, errors, blocked)
     wide: dict[tuple[str, str], Wide] = {}
     for slug in slugs:
         await asyncio.wait_for(page.evaluate(_GO, slug), PROBE_S)

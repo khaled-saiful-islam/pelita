@@ -5,11 +5,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Code2,
-  Download,
   Image as ImageIcon,
   Link2,
   Loader2,
   Pencil,
+  RotateCcw,
   SquareArrowOutUpRight,
   X,
 } from 'lucide-react'
@@ -24,11 +24,14 @@ import { EditableFrame } from '@/components/artifacts/EditableFrame'
 import { SiteBar } from '@/components/artifacts/SiteBar'
 import { SiteFrame } from '@/components/artifacts/SiteFrame'
 import { ShareArtifactDialog } from '@/components/artifacts/ShareArtifactDialog'
+import { DownloadMenu } from '@/components/artifacts/DownloadMenu'
 import { useArtifact } from '@/hooks/useArtifact'
 import { apiFetch } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { isDeck, slidesOf } from '@/lib/deck'
-import { isSite, sitePages, type Device } from '@/lib/site'
+import { isApp, isFluid, isSite, sitePages, withState, type Device } from '@/lib/site'
+import { useAppState } from '@/hooks/useAppState'
+import { Confirm } from '@/components/ui/Confirm'
 import type { ArtifactBuild } from '@/lib/chat-types'
 
 /**
@@ -80,6 +83,17 @@ export function ArtifactPanel({
   const [current, setCurrent] = useState(0)
 
   const site = !!artifact && isSite(artifact.kind)
+  const app = !!artifact && isApp(artifact.kind)
+  const fluid = !!artifact && isFluid(artifact.kind)
+  const kept = useAppState(app && artifact ? artifact.id : null)
+  const [startingOver, setStartingOver] = useState(false)
+  // What the app opens with: its document, with what this person saved put in
+  // front of it. Recomputed for a new version or a fresh start, never for a
+  // save — the frame must not reload every time somebody ticks a box.
+  const appHtml = useMemo(
+    () => (app && artifact && kept.ready ? withState(artifact.html, kept.current()) : null),
+    [app, artifact?.html, kept.ready, kept.nonce],
+  )
   const pages = useMemo(() => (artifact && site ? sitePages(artifact.html) : []), [artifact, site])
   const [device, setDevice] = useState<Device>('desktop')
   const [sitePage, setSitePage] = useState<string | null>(null)
@@ -151,7 +165,9 @@ export function ArtifactPanel({
               {artifact.kind} ·{' '}
               {site
                 ? `${pages.length} page${pages.length === 1 ? '' : 's'}`
-                : `${artifact.width}×${artifact.height}`}
+                : app
+                  ? 'remembers your data'
+                  : `${artifact.width}×${artifact.height}`}
               {artifact.versions.length > 1 && ` · v${artifact.version}`}
             </p>
           )}
@@ -214,7 +230,7 @@ export function ArtifactPanel({
               <Button variant="ghost" size="sm" onClick={() => setSharing(true)} title="Share a link">
                 <Link2 className="size-4" aria-hidden />
               </Button>
-              <DownloadMenu artifact={artifact} deck={deck} playable={playable} site={site} />
+              <DownloadMenu artifact={artifact} deck={deck} playable={playable} site={site} app={app} />
               <a
                 href={`/api/artifacts/${artifact.id}/raw?version=${artifact.version}`}
                 target="_blank"
@@ -257,14 +273,33 @@ export function ArtifactPanel({
 
         {artifact && showing === 'preview' && (
           <>
-            {site && (
+            {fluid && (
               <SiteBar
                 pages={pages}
                 page={sitePage}
                 onPage={setSitePage}
                 device={device}
                 onDevice={setDevice}
+                fit={app}
+                actions={
+                  app && !editing ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setStartingOver(true)}
+                      title="Clear what this app has saved and open it empty"
+                    >
+                      <RotateCcw className="size-3.5" aria-hidden />
+                      <span className="hidden lg:inline">Start over</span>
+                    </Button>
+                  ) : null
+                }
               />
+            )}
+            {app && kept.error && (
+              <p className="mx-4 mt-2 text-xs text-warning" role="status">
+                {kept.error}
+              </p>
             )}
             {editing && (
               <p className="mx-4 mt-3 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-xs">
@@ -286,7 +321,27 @@ export function ArtifactPanel({
                 </span>
               </div>
             )}
-            {site ? (
+            {app ? (
+              appHtml ? (
+                <SiteFrame
+                  html={appHtml}
+                  sandbox={artifact.sandbox}
+                  title={artifact.title}
+                  device={device}
+                  fit
+                  onStore={kept.save}
+                  onEdit={
+                    editing
+                      ? (index, text) => setChanges((was) => new Map(was).set(index, text))
+                      : undefined
+                  }
+                />
+              ) : (
+                <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" aria-hidden /> Opening
+                </div>
+              )
+            ) : site ? (
               <SiteFrame
                 html={artifact.html}
                 sandbox={artifact.sandbox}
@@ -365,6 +420,19 @@ export function ArtifactPanel({
         </footer>
       )}
 
+      {startingOver && (
+        <Confirm
+          title="Start this app over?"
+          body="Everything it has saved for you — its entries, its settings — will be cleared, and it will open empty. The app itself stays as it is."
+          confirmLabel="Start over"
+          onCancel={() => setStartingOver(false)}
+          onConfirm={() => {
+            setStartingOver(false)
+            void kept.reset()
+          }}
+        />
+      )}
+
       {sharing && artifact && (
         <ShareArtifactDialog
           artifactId={artifact.id}
@@ -373,89 +441,6 @@ export function ArtifactPanel({
         />
       )}
     </div>
-  )
-}
-
-/**
- * Saving the poster.
- *
- * A picture by default, because that is what a poster is for — it goes into a
- * message or a feed, and neither takes an HTML file. The document is the
- * second option, for whoever wants to edit it again later.
- *
- * Plain links, not fetch-and-blob: the browser already knows how to save a
- * file the server marked as an attachment.
- */
-function DownloadMenu({
-  artifact,
-  deck,
-  playable,
-  site,
-}: {
-  artifact: { id: string; version: number }
-  deck: boolean
-  /** A game: the file is the thing, and there is no picture of it. */
-  playable?: boolean
-  /** A website: one file with every page in it. */
-  site?: boolean
-}) {
-  const fileOnly = playable || site
-  const [open, setOpen] = useState(false)
-  const base = `/api/artifacts/${artifact.id}/download?version=${artifact.version}`
-
-  return (
-    <span className="relative">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen((was) => !was)}
-        aria-expanded={open}
-        title="Download"
-      >
-        <Download className="size-4" aria-hidden />
-      </Button>
-      {open && (
-        <>
-          <span className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
-          <span className="absolute right-0 top-full z-20 mt-1 flex w-44 flex-col overflow-hidden rounded-lg border border-border bg-background py-1 shadow-lg">
-            {/* A game has one download, because a picture of one is its first
-                frame with nobody playing. The file opens and plays anywhere. */}
-            {!fileOnly && (
-              <a
-                href={base}
-                download
-                onClick={() => setOpen(false)}
-                className="px-3 py-2 text-left text-xs hover:bg-hover"
-              >
-                <span className="block font-medium">
-                  {deck ? 'Slides (PDF)' : 'Picture (PNG)'}
-                </span>
-                <span className="block text-muted-foreground">
-                  {deck ? 'One slide a page, to present or send' : 'To post or send'}
-                </span>
-              </a>
-            )}
-            <a
-              href={`${base}&format=html`}
-              download
-              onClick={() => setOpen(false)}
-              className="px-3 py-2 text-left text-xs hover:bg-hover"
-            >
-              <span className="block font-medium">
-                {playable ? 'Game (HTML)' : site ? 'Website (HTML)' : 'Document (HTML)'}
-              </span>
-              <span className="block text-muted-foreground">
-                {playable
-                  ? 'One file. Open it in any browser and play'
-                  : site
-                    ? 'One file with every page in it. Opens in any browser'
-                    : 'To edit or print later'}
-              </span>
-            </a>
-          </span>
-        </>
-      )}
-    </span>
   )
 }
 

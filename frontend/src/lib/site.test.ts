@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { editableSite, siteLayout, sitePages } from './site'
+import { editableSite, isFluid, siteLayout, sitePages, withState } from './site'
 
 const SITE = `<!DOCTYPE html><html><head><script data-pelita="route-head">1</script></head><body>
 <header><nav><a class="nav-link" href="#/home">Home</a></nav></header>
@@ -59,5 +59,44 @@ describe('editableSite', () => {
   it('puts the editor in before the router, so a click on a link edits it instead', () => {
     expect(editing.indexOf('window.EDITOR')).toBeLessThan(editing.indexOf('data-pelita="router"'))
     expect(editing).toContain('stopImmediatePropagation')
+  })
+})
+
+describe('an app in the panel', () => {
+  it('is laid out at the panel’s own width, at full size, so it can be used', () => {
+    // Shrunk to half size to show a desktop layout, its buttons are too small
+    // to press — and an app is used here, not looked at.
+    expect(siteLayout('desktop', 640, true)).toEqual({ width: 640, scale: 1 })
+  })
+
+  it('still shows a phone at the phone’s width', () => {
+    expect(siteLayout('phone', 640, true)).toEqual({ width: 390, scale: 1 })
+  })
+
+  it('is one of the kinds that fill the panel', () => {
+    expect(isFluid('app')).toBe(true)
+    expect(isFluid('website')).toBe(true)
+    expect(isFluid('poster')).toBe(false)
+  })
+})
+
+describe('withState', () => {
+  const app = '<!DOCTYPE html><html><head><script data-pelita="store">x</script></head><body></body></html>'
+
+  it('puts what was saved in front of the store that reads it', () => {
+    const opened = withState(app, { tasks: ['Call Aina'] })
+    expect(opened.indexOf('__PELITA_STATE__')).toBeLessThan(opened.indexOf('data-pelita="store"'))
+    expect(opened).toContain('{"tasks":["Call Aina"]}')
+  })
+
+  it('says null rather than nothing, so the app does not go looking elsewhere', () => {
+    expect(withState(app, null)).toContain('window.__PELITA_STATE__ = null;')
+  })
+
+  it('cannot be ended early by what somebody typed into the app', () => {
+    const opened = withState(app, { note: '</script><script>alert(1)</script>' })
+    const tag = opened.slice(opened.indexOf('data-pelita="state"'))
+    expect(tag.indexOf('</script>')).toBeGreaterThan(tag.indexOf('__PELITA_STATE__'))
+    expect(tag).toContain('\\u003c/script>')
   })
 })

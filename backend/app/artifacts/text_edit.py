@@ -22,8 +22,11 @@ from html import escape, unescape
 # Tags and the text between them. Text in a valid document never contains `<`,
 # so alternate segments are exactly the runs of text.
 _SEGMENTS = re.compile(r"(<[^>]*>)")
-_OPEN = re.compile(r"<\s*(script|style)\b", re.IGNORECASE)
-_CLOSE = re.compile(r"<\s*/\s*(script|style)\s*>", re.IGNORECASE)
+# `template` and `noscript` too: the browser editing the words never walks a
+# template's contents, and is told to skip noscript, so counting either here
+# would shift every number after it by the runs inside.
+_OPEN = re.compile(r"<\s*(script|style|template|noscript)\b", re.IGNORECASE)
+_CLOSE = re.compile(r"<\s*/\s*(script|style|template|noscript)\s*>", re.IGNORECASE)
 # The browser numbers what it can see, walking from <body>. Anything above it —
 # the <title> most of all — is not words on the poster, and counting it here
 # shifts every number by one and edits the run next to the one somebody meant.

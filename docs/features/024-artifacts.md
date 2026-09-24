@@ -362,6 +362,53 @@ at whatever width the panel happens to be, which is nobody's device. Its pages
 are repeated as tabs above it, synced by message with the router inside the
 frame. It downloads as one HTML file with every page in it.
 
+### Apps, and the one kind that remembers
+
+An app is a tool somebody uses: a calculator, a wheel of names, a task board,
+a budget, a timer. It is built the way a game is, because it is the same shape
+of thing -- one program, designed first, written in one call, proved by being
+used -- and shown the way a website is: filling the panel, with Desktop, Tablet
+and Phone.
+
+| step | produces |
+|---|---|
+| **design** | the job, the three to five core actions, what it keeps, the first screen, the one detail that shows care, the look |
+| **write** | the whole self-contained document, in one call, at most about 50 KB; one cut off before `</html>` is written again, tighter |
+| **use it** | typed into, Enter pressed, every button pressed at 1280px; measured at a 390px phone; what broke goes back, twice at most |
+
+**Loading an app proves very little.** A task board renders perfectly and
+throws the moment somebody presses "Add"; the failures live behind the
+controls. `apptest.py` fills every text field with something plausible for its
+type, presses Enter, presses up to twelve buttons in turn, and reads the
+console. A `confirm()` or `alert()` is recorded as a failure too: those are
+blocked in the frame, so a question asked with one is never asked.
+
+**What it keeps is saved on the account.** The frame has an opaque origin, so
+`localStorage` throws and the app cannot call the API. It is given
+`PelitaStore` instead (`app_runtime.py`), in front of its own script:
+
+    const state = PelitaStore.load({ tasks: [] })   // saved data over these defaults
+    PelitaStore.save(state)                          // batched; call it as often as you like
+
+In the panel, what was saved is fetched from `GET /artifacts/{id}/state` and put
+into the document before it is framed, so `load` is synchronous and the first
+paint already has your tasks. Every `save` goes to the panel by message, and the
+panel `PUT`s it, batched, for this person and this artifact only -- 256 KB at
+most, owner-only, one row overwritten rather than a history. **Start over**
+clears it. A new version of the app, after a change in the chat, opens with what
+was typed a minute ago, not what was loaded at the start; `load` merges over the
+defaults, so a field the new version adds still has a value.
+
+A **share-link visitor** has no account, and the owner's data is not theirs to
+see -- a shared task board that showed somebody else's tasks would be a leak.
+So a shared app is handed out empty and the visitor's copy is kept in their own
+browser. A **downloaded** copy uses that browser's storage, keyed by an id the
+app keeps across every change. Opened in a new tab, it runs and forgets.
+
+In the panel an app is laid out at the panel's own width at full size, where a
+website is shrunk to show its desktop layout: a site is looked at, an app is
+used, and at half size its buttons are too small to press.
+
 ### A photograph, when the design wants one
 
 A model cannot produce a photograph, and one asked for a picture writes a URL
@@ -571,6 +618,14 @@ documented failure of every implementation that has tried it.
   are written separately; the guards above cover the two disagreements found
   so far (photographs, and grid items that will not shrink). Others will
   exist.
+- **An app is checked by a robot that does not know what it is for.** It
+  presses every button once; it does not notice that "Add" adds the wrong
+  thing, or that a total is off by one.
+- **An app has no network.** One that would need live data -- rates, weather
+  -- is built on realistic sample data and says so.
+- **An app opened in a new tab forgets.** It runs under the same opaque origin
+  and nothing can save for it there. The panel, the share link and a download
+  all remember.
 - **The build clock restarts when the page does.** The steps replay with the
   server's own timings in them ("Composing 13.8 KB in 70s"), but the elapsed
   counter in the header counts from when this browser started watching.

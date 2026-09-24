@@ -1,4 +1,4 @@
-import { AppWindow, Gamepad2, Image as ImageIcon, Presentation, Sparkles } from 'lucide-react'
+import { AppWindow, Gamepad2, Image as ImageIcon, LayoutGrid, Presentation, Sparkles } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 /**
@@ -81,6 +81,16 @@ const LOOKS: Record<string, KindLook> = {
     border: 'border-kind-website/30',
     hover: 'hover:border-kind-website/60 hover:from-kind-website/20 hover:to-kind-website/[0.08]',
     ring: 'ring-kind-website/50',
+    ratio: '1280 / 800',
+  },
+  app: {
+    icon: LayoutGrid,
+    colour: 'text-kind-app',
+    tile: 'bg-kind-app text-white',
+    surface: 'bg-gradient-to-r from-kind-app/12 to-kind-app/[0.04]',
+    border: 'border-kind-app/30',
+    hover: 'hover:border-kind-app/60 hover:from-kind-app/20 hover:to-kind-app/[0.08]',
+    ring: 'ring-kind-app/50',
     ratio: '1280 / 800',
   },
 }

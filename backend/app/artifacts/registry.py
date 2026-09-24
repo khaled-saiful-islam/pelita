@@ -13,6 +13,7 @@ from app.artifacts.games import GamesKind
 from app.artifacts.model import ArtifactModel
 from app.artifacts.poster import PosterKind
 from app.artifacts.slides import SlidesKind
+from app.artifacts.web_app import AppKind
 from app.artifacts.website import WebsiteKind
 from app.core.config import Settings, get_settings
 from app.providers.openai_compatible import OpenAICompatibleProvider
@@ -71,6 +72,13 @@ def build_kinds(settings: Settings | None = None) -> dict[str, ArtifactKind]:
             max_bytes=settings.artifact_max_bytes * 4,
             search=search,
             # The same browser and the same switch as the game's playtest.
+            check=settings.artifact_playtest,
+        ),
+        AppKind(
+            model,
+            max_bytes=settings.artifact_max_bytes,
+            # Used in the same browser as the game's playtest, under the same
+            # switch.
             check=settings.artifact_playtest,
         ),
     ]

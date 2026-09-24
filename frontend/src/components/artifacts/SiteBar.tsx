@@ -24,17 +24,25 @@ export function SiteBar({
   onPage,
   device,
   onDevice,
+  actions,
+  fit = false,
 }: {
   pages: SitePage[]
   page: string | null
   onPage: (slug: string) => void
   device: Device
   onDevice: (device: Device) => void
+  /** Anything the kind needs beside the screens: an app's "start over". */
+  actions?: React.ReactNode
+  /** On a desktop, laid out at the panel's width rather than a desktop's. */
+  fit?: boolean
 }) {
   const current = page ?? pages[0]?.slug ?? null
 
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-background/60 px-2 sm:px-3">
+      {pages.length === 0 && <div className="min-w-0 flex-1" />}
+      {pages.length > 0 && (
       <nav
         aria-label="Pages of this site"
         className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]"
@@ -60,6 +68,9 @@ export function SiteBar({
           <span className="px-1 text-xs text-muted-foreground">One page</span>
         )}
       </nav>
+      )}
+
+      {actions}
 
       <div role="radiogroup" aria-label="Screen size" className="flex shrink-0 rounded-md bg-muted p-0.5">
         {(Object.keys(DEVICES) as Device[]).map((each) => {
@@ -71,7 +82,11 @@ export function SiteBar({
               role="radio"
               aria-checked={each === device}
               onClick={() => onDevice(each)}
-              title={`${DEVICES[each].label} · ${DEVICES[each].width}px`}
+              title={
+                fit && each === 'desktop'
+                  ? 'Desktop · as wide as the panel'
+                  : `${DEVICES[each].label} · ${DEVICES[each].width}px`
+              }
               className={cn(
                 'flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors',
                 each === device

@@ -25,7 +25,7 @@ export const EDITOR = `
     acceptNode: function (node) {
       if (!node.textContent.trim()) return NodeFilter.FILTER_REJECT
       var tag = node.parentNode && node.parentNode.nodeName
-      if (tag === 'STYLE' || tag === 'SCRIPT') return NodeFilter.FILTER_REJECT
+      if (tag === 'STYLE' || tag === 'SCRIPT' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT
       return NodeFilter.FILTER_ACCEPT
     },
   })

@@ -5,7 +5,7 @@ import { Logo } from '@/components/Logo'
 import { ArtifactFrame } from '@/components/artifacts/ArtifactFrame'
 import { SiteBar } from '@/components/artifacts/SiteBar'
 import { SiteFrame } from '@/components/artifacts/SiteFrame'
-import { isSite, sitePages, type Device } from '@/lib/site'
+import { isApp, isFluid, isSite, sitePages, withState, type Device } from '@/lib/site'
 
 interface Shared {
   html: string
@@ -27,6 +27,10 @@ interface Shared {
  * of the document once it is framed. This page used to frame everything with
  * `sandbox=""`, which is right for a poster and meant a shared game could not
  * run and a shared website's menu went nowhere.
+ *
+ * A shared app is handed out without its owner's data — a shared task board
+ * that showed somebody else's tasks would be a leak, not a feature. A visitor
+ * has no account to keep theirs on, so it is kept in their own browser.
  */
 export default function SharedArtifact() {
   const { token } = useParams<{ token: string }>()
@@ -57,7 +61,15 @@ export default function SharedArtifact() {
   }, [token])
 
   const site = isSite(shared?.kind)
+  const app = isApp(shared?.kind)
+  const fluid = isFluid(shared?.kind)
   const pages = useMemo(() => (shared && site ? sitePages(shared.html) : []), [shared, site])
+  const key = `pelita-app:shared:${token}`
+  // Read once, when the app arrives; a save must not reload the frame.
+  const appHtml = useMemo(
+    () => (shared && app ? withState(shared.html, readLocal(key)) : null),
+    [shared, app, key],
+  )
 
   return (
     <div className="flex h-dvh flex-col bg-surface">
@@ -78,7 +90,7 @@ export default function SharedArtifact() {
         </div>
       )}
 
-      {shared && site && (
+      {shared && fluid && (
         <>
           <SiteBar
             pages={pages}
@@ -86,19 +98,22 @@ export default function SharedArtifact() {
             onPage={setPage}
             device={device}
             onDevice={setDevice}
+            fit={app}
           />
           <SiteFrame
-            html={shared.html}
+            html={appHtml ?? shared.html}
             sandbox={shared.sandbox}
-            title="Shared website"
+            title={app ? 'Shared app' : 'Shared website'}
             device={device}
             page={page}
             onPage={setPage}
+            fit={app}
+            onStore={app ? (text) => writeLocal(key, text) : undefined}
           />
         </>
       )}
 
-      {shared && !site && (
+      {shared && !fluid && (
         <ArtifactFrame
           html={shared.html}
           width={shared.width}
@@ -109,4 +124,23 @@ export default function SharedArtifact() {
       )}
     </div>
   )
+}
+
+/** What a visitor's copy of a shared app saved, in their own browser. */
+function readLocal(key: string): unknown {
+  try {
+    const text = window.localStorage.getItem(key)
+    return text ? JSON.parse(text) : null
+  } catch {
+    return null
+  }
+}
+
+function writeLocal(key: string, text: string): void {
+  if (text.length > 256 * 1024) return
+  try {
+    window.localStorage.setItem(key, text)
+  } catch {
+    // Private mode or full: the app works, it just forgets.
+  }
 }

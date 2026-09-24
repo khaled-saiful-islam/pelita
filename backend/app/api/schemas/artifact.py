@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -65,3 +66,9 @@ class EditTextRequest(BaseModel):
 
 class ReviseRequest(BaseModel):
     instruction: str = Field(min_length=1, max_length=1000)
+
+
+class AppState(BaseModel):
+    """What an app saved. Its shape is the app's own; only its size is ours."""
+
+    data: Any = Field(default=None, description="The app's saved data, as JSON.")

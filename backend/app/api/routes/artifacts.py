@@ -9,12 +9,14 @@ indistinguishable from one that never existed.
 
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.api.deps import CurrentUser, SessionDep, SettingsDep, limit_share
 from app.api.schemas.artifact import (
+    AppState,
     ArtifactDetail,
     ArtifactList,
     ArtifactShareResponse,
@@ -192,6 +194,55 @@ async def revise(
     return await read(artifact_id, session, user, settings)
 
 
+# The most an app may keep. A task list with a year of history is a few tens of
+# kilobytes; past this it is not state, it is a database, and a row this size
+# would be read on every open.
+MAX_STATE_BYTES = 256 * 1024
+
+
+async def _owned(session, artifact_id: UUID, user_id: UUID) -> Artifact:
+    artifact = await SqlArtifactRepository(session).get(artifact_id, user_id)
+    if artifact is None:
+        raise NotFoundError("No such artifact.")
+    return artifact
+
+
+@router.get("/{artifact_id}/state", response_model=AppState)
+async def read_state(artifact_id: UUID, session: SessionDep, user: CurrentUser) -> AppState:
+    """What this person's copy of the app last saved. `null` before the first save."""
+    await _owned(session, artifact_id, user.id)
+    return AppState(data=await SqlArtifactRepository(session).state(artifact_id, user.id))
+
+
+@router.put("/{artifact_id}/state", status_code=status.HTTP_204_NO_CONTENT)
+async def save_state(
+    artifact_id: UUID, payload: AppState, session: SessionDep, user: CurrentUser
+) -> None:
+    """Keep what the app saved, for this person only.
+
+    Owner-only, like every other artifact route: the app is framed with an
+    opaque origin and cannot call this itself, so the panel saves on its
+    behalf and only for the artifact it is showing.
+    """
+    await _owned(session, artifact_id, user.id)
+    size = len(json.dumps(payload.data, separators=(",", ":")).encode())
+    if size > MAX_STATE_BYTES:
+        raise ValidationError(
+            f"This app is trying to keep {size // 1024} KB; the limit is "
+            f"{MAX_STATE_BYTES // 1024} KB."
+        )
+    await SqlArtifactRepository(session).save_state(artifact_id, user.id, payload.data)
+    await session.commit()
+
+
+@router.delete("/{artifact_id}/state", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_state(artifact_id: UUID, session: SessionDep, user: CurrentUser) -> None:
+    """Start the app over, empty."""
+    await _owned(session, artifact_id, user.id)
+    await SqlArtifactRepository(session).clear_state(artifact_id, user.id)
+    await session.commit()
+
+
 @router.get("/{artifact_id}/raw", response_class=Response)
 async def raw(
     artifact_id: UUID,
@@ -353,7 +404,7 @@ async def download(
 
 # What a download is, by kind, when nobody said. A game and a website are
 # the file: a picture of either is one frame of something meant to be used.
-_DOWNLOADS = {"slides": "pdf", "games": "html", "website": "html"}
+_DOWNLOADS = {"slides": "pdf", "games": "html", "website": "html", "app": "html"}
 
 
 def _filename(title: str) -> str:

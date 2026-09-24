@@ -29,6 +29,15 @@ export function isSite(kind: string | undefined): boolean {
   return kind === 'website'
 }
 
+export function isApp(kind: string | undefined): boolean {
+  return kind === 'app'
+}
+
+/** Shown filling the panel and scrolling, rather than as a fixed surface. */
+export function isFluid(kind: string | undefined): boolean {
+  return isSite(kind) || isApp(kind)
+}
+
 /** The pages, in order, as the nav names them. */
 export function sitePages(html: string): SitePage[] {
   const pages: SitePage[] = []
@@ -51,11 +60,34 @@ export function sitePages(html: string): SitePage[] {
  * and scaled down — unless the panel is wider than that, when it simply fills
  * it, the way a real browser window would.
  */
-export function siteLayout(device: Device, room: number): { width: number; scale: number } {
+export function siteLayout(
+  device: Device,
+  room: number,
+  fit = false,
+): { width: number; scale: number } {
   const wanted = DEVICES[device].width
   if (room <= 0) return { width: wanted, scale: 0 }
-  if (device === 'desktop' && room >= wanted) return { width: room, scale: 1 }
+  // An app is used in the panel, not looked at: shrunk to half size to show
+  // its desktop layout, its buttons are too small to press. So on a desktop
+  // it is laid out at the panel's own width, at full size.
+  if (device === 'desktop' && (fit || room >= wanted)) return { width: room, scale: 1 }
   return { width: wanted, scale: Math.min(room / wanted, 1) }
+}
+
+/**
+ * An app with what it last saved put in front of everything.
+ *
+ * Done here rather than stored, because the saved data belongs to a person and
+ * the document belongs to the app. `null` is still written: it tells the app's
+ * runtime not to go looking in a storage it cannot reach from inside a frame.
+ */
+export function withState(html: string, data: unknown): string {
+  const given = JSON.stringify(data ?? null).replace(/</g, '\\u003c')
+  const tag = `<script data-pelita="state">window.__PELITA_STATE__ = ${given};<\/script>`
+  const head = /<head\b[^>]*>/i.exec(html)
+  if (!head) return tag + html
+  const at = head.index + head[0].length
+  return html.slice(0, at) + tag + html.slice(at)
 }
 
 /**
