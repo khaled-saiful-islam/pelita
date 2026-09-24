@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { useEffect } from 'react'
 import { Button, Spinner } from '@/components/ui'
+import { Confirm } from '@/components/ui/Confirm'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/lib/auth'
 import type { ConversationSummary } from '@/hooks/useConversations'
@@ -69,6 +70,9 @@ export function Sidebar({
 }) {
   const { user, signOut } = useAuth()
   const groups = groupByRecency(conversations)
+  // Held here rather than in the row, so the dialog is not inside the thing it
+  // is about to remove.
+  const [confirming, setConfirming] = useState<ConversationSummary | null>(null)
 
   // Escape closes the drawer. Expected of anything that covers the page, and
   // the only way out for someone not using a pointer.
@@ -149,7 +153,7 @@ export function Sidebar({
                   active={conversation.id === activeId}
                   onSelect={onSelect}
                   onRename={onRename}
-                  onDelete={onDelete}
+                  onDelete={() => setConfirming(conversation)}
                 />
               ))}
             </ul>
@@ -185,6 +189,29 @@ export function Sidebar({
         </div>
       </div>
       </aside>
+
+      {/* Deleting a chat takes the messages, the files and anything made in it
+          with it, and there is no undo. Naming it is the point: a dialog that
+          only says "are you sure?" asks a question nobody can answer. */}
+      {confirming && (
+        <Confirm
+          title="Delete this chat?"
+          body={
+            <>
+              <span className="font-medium text-foreground">{confirming.title}</span> and
+              everything in it — the messages, the files, anything it made — will be gone.
+              This cannot be undone.
+            </>
+          }
+          confirmLabel="Delete chat"
+          onCancel={() => setConfirming(null)}
+          onConfirm={() => {
+            const doomed = confirming
+            setConfirming(null)
+            onDelete(doomed.id)
+          }}
+        />
+      )}
     </>
   )
 }
@@ -200,7 +227,8 @@ function ConversationRow({
   active: boolean
   onSelect: (id: string) => void
   onRename: (id: string, title: string) => void
-  onDelete: (id: string) => void
+  /** Chosen from the row's menu. What actually happens is asked about first. */
+  onDelete: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(conversation.title)
@@ -292,7 +320,7 @@ function ConversationRow({
               destructive
               onClick={() => {
                 setMenuOpen(false)
-                onDelete(conversation.id)
+                onDelete()
               }}
             >
               <Trash2 className="size-3.5" aria-hidden />
