@@ -72,11 +72,7 @@ function serve(server: Server) {
     if (url === '/api/chat/stream') return server.turn!.response
     if (url.startsWith('/api/chat/live/')) {
       const id = url.slice('/api/chat/live/'.length)
-      if (server.liveFor !== id) {
-        return new Response(JSON.stringify({ error: { message: 'nothing running' } }), {
-          status: 404,
-        })
-      }
+      if (server.liveFor !== id) return new Response(null, { status: 204 })
       return server.turn!.response
     }
     const artifacts = url.match(/^\/api\/conversations\/(.+)\/artifacts$/)

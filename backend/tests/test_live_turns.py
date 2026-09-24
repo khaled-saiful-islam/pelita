@@ -208,17 +208,18 @@ async def _signed_in(client, username: str = "tester") -> None:
 
 
 @pytest.mark.asyncio
-async def test_following_a_conversation_with_nothing_running_is_a_plain_404(
+async def test_following_a_conversation_with_nothing_running_is_an_empty_success(
     api, db_user
 ) -> None:
     """The ordinary case. Every conversation is asked about on the way in, and
-    almost none of them have a turn in flight."""
+    almost none of them have a turn in flight -- so not a 404, which a browser
+    logs as a console error on every conversation opened."""
     async with api as client:
         await _signed_in(client)
         response = await client.get(f"/api/chat/live/{uuid4()}")
 
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "not_found"
+    assert response.status_code == 204
+    assert response.content == b""
 
 
 @pytest.mark.asyncio

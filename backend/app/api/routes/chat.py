@@ -13,12 +13,11 @@ import logging
 from collections.abc import AsyncIterator
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import ChatServiceDep, CurrentUser, SessionDep, limit_chat
 from app.api.schemas.chat import FeedbackRequest, FeedbackResponse, SendMessageRequest
-from app.core.errors import NotFoundError
 from app.services.events import (
     AccountingEvent,
     ArtifactDeltaEvent,
@@ -256,8 +255,8 @@ async def stream(
     return EventSourceResponse(_frames(turn.follow()), ping=15)
 
 
-@router.get("/live/{conversation_id}")
-async def live(conversation_id: UUID, user: CurrentUser) -> EventSourceResponse:
+@router.get("/live/{conversation_id}", response_model=None)
+async def live(conversation_id: UUID, user: CurrentUser) -> EventSourceResponse | Response:
     """Follow a turn that is already running in this conversation.
 
     Replayed from its first event, so a client that has just arrived sees the
@@ -266,12 +265,15 @@ async def live(conversation_id: UUID, user: CurrentUser) -> EventSourceResponse:
     makes leaving mid-build and coming back, or reloading the page, show the
     work instead of an empty conversation.
 
-    404 when nothing is running, which is the ordinary case and not an error
-    worth showing anyone.
+    204 when nothing is running. That is the ordinary answer -- every
+    conversation is asked on the way in and almost none have a turn in flight
+    -- so it is a success with nothing in it, not a 404: a browser logs every
+    4xx as a console error, and this one would have been logged on every
+    conversation anybody opened.
     """
     turn = live_turns.find(conversation_id, user.id)
     if turn is None:
-        raise NotFoundError("Nothing is being generated in this conversation.")
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     return EventSourceResponse(_frames(turn.follow()), ping=15)
 
 

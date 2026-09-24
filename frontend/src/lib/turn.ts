@@ -36,7 +36,9 @@ export function pauseBefore(attempt: number): number {
  * Open the stream.
  *
  * `null` means there was nothing to follow — the ordinary answer when a
- * conversation simply has no turn running in it, and not worth reporting.
+ * conversation simply has no turn running in it, and not worth reporting. The
+ * server says so with a 204 rather than a 404, because a browser logs every
+ * 4xx as a console error and this is asked of every conversation opened.
  */
 export async function openTurn(
   opening: Opening,
@@ -44,7 +46,7 @@ export async function openTurn(
 ): Promise<Response | null> {
   if (opening.kind === 'follow') {
     const response = await fetch(`/api/chat/live/${opening.conversation}`, { signal })
-    return response.status === 404 ? null : response
+    return response.status === 204 || response.status === 404 ? null : response
   }
   return fetch('/api/chat/stream', {
     method: 'POST',
