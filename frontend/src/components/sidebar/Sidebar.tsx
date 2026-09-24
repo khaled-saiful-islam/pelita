@@ -4,6 +4,8 @@ import {
   Check,
   LogOut,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   PenSquare,
   Settings,
   Trash2,
@@ -73,6 +75,9 @@ export function Sidebar({
   // Held here rather than in the row, so the dialog is not inside the thing it
   // is about to remove.
   const [confirming, setConfirming] = useState<ConversationSummary | null>(null)
+  // Folded to a rail of icons, from md up. On a phone the sidebar is a drawer
+  // already, and folding a drawer would only hide the button that opens it.
+  const [folded, setFolded] = useFolded()
 
   // Escape closes the drawer. Expected of anything that covers the page, and
   // the only way out for someone not using a pointer.
@@ -99,13 +104,24 @@ export function Sidebar({
 
       <aside
         className={cn(
-          'flex h-dvh w-[var(--sidebar-width)] shrink-0 flex-col border-r border-border bg-sidebar',
+          'flex h-dvh w-[var(--sidebar-width)] shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar',
           // Off-canvas below md, static from md up.
-          'fixed inset-y-0 left-0 z-40 transition-transform md:static md:translate-x-0',
+          'fixed inset-y-0 left-0 z-40 md:static md:translate-x-0',
+          'transition-[transform,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]',
           open ? 'translate-x-0 shadow-lg' : '-translate-x-full',
+          folded && 'md:w-[3.75rem]',
         )}
       >
-      <div className="flex items-center gap-1 p-3">
+      {folded && (
+        <Rail
+          onUnfold={() => setFolded(false)}
+          onNew={onNew}
+          admin={!!user?.is_admin}
+          onSignOut={signOut}
+        />
+      )}
+
+      <div className={cn('flex items-center gap-1 p-3', folded && 'md:hidden')}>
         <button
           type="button"
           onClick={onNew}
@@ -121,6 +137,17 @@ export function Sidebar({
         <Button
           variant="ghost"
           size="icon"
+          onClick={() => setFolded(true)}
+          aria-label="Minimise the sidebar"
+          title="Minimise the sidebar"
+          className="hidden shrink-0 md:inline-flex"
+        >
+          <PanelLeftClose className="size-4" aria-hidden />
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={onClose}
           aria-label="Close menu"
           className="md:hidden"
@@ -129,7 +156,10 @@ export function Sidebar({
         </Button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversation history">
+      <nav
+        className={cn('flex-1 overflow-y-auto px-2 pb-2', folded && 'md:hidden')}
+        aria-label="Conversation history"
+      >
         {loading && conversations.length === 0 && (
           <div className="grid place-items-center py-8">
             <Spinner />
@@ -161,7 +191,7 @@ export function Sidebar({
         ))}
       </nav>
 
-      <div className="border-t border-border p-2">
+      <div className={cn('border-t border-border p-2', folded && 'md:hidden')}>
         <div className="flex items-center gap-1">
           <Link to="/profile" className="min-w-0 flex-1">
             <Button variant="ghost" size="sm" className="w-full justify-start truncate">
@@ -353,5 +383,107 @@ function MenuItem({
     >
       {children}
     </button>
+  )
+}
+
+const FOLDED_KEY = 'pelita-sidebar-folded'
+
+/** Remembered, because a sidebar that springs back open on every reload is
+ *  one somebody has to fold again every time. */
+function useFolded(): [boolean, (folded: boolean) => void] {
+  const [folded, setFolded] = useState(() => {
+    try {
+      return localStorage.getItem(FOLDED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const set = (next: boolean) => {
+    setFolded(next)
+    try {
+      localStorage.setItem(FOLDED_KEY, next ? '1' : '0')
+    } catch {
+      // Private windows: it folds for this visit and forgets.
+    }
+  }
+  return [folded, set]
+}
+
+/**
+ * The sidebar folded down to what is needed without it: a way back, a new
+ * chat, and the account. The conversation list is the part that takes room,
+ * and it is one click away.
+ */
+function Rail({
+  onUnfold,
+  onNew,
+  admin,
+  onSignOut,
+}: {
+  onUnfold: () => void
+  onNew: () => void
+  admin: boolean
+  onSignOut: () => void
+}) {
+  return (
+    <div className="hidden h-full flex-col items-center gap-1 py-3 md:flex">
+      <RailButton label="Open the sidebar" onClick={onUnfold}>
+        <PanelLeftOpen className="size-4" aria-hidden />
+      </RailButton>
+      <RailButton label="New chat" onClick={onNew} strong>
+        <PenSquare className="size-4" aria-hidden />
+      </RailButton>
+
+      <div className="mt-auto flex flex-col items-center gap-1">
+        <Link to="/profile" aria-label="Profile" title="Profile">
+          <RailButton label="Profile">
+            <User className="size-4" aria-hidden />
+          </RailButton>
+        </Link>
+        {admin && (
+          <Link to="/admin" aria-label="Users" title="Users">
+            <RailButton label="Users">
+              <UserCog className="size-4" aria-hidden />
+            </RailButton>
+          </Link>
+        )}
+        <Link to="/settings" aria-label="Settings" title="Settings">
+          <RailButton label="Settings">
+            <Settings className="size-4" aria-hidden />
+          </RailButton>
+        </Link>
+        <RailButton label="Sign out" onClick={onSignOut}>
+          <LogOut className="size-4" aria-hidden />
+        </RailButton>
+      </div>
+    </div>
+  )
+}
+
+function RailButton({
+  label,
+  onClick,
+  strong,
+  children,
+}: {
+  label: string
+  onClick?: () => void
+  strong?: boolean
+  children: React.ReactNode
+}) {
+  const Tag = onClick ? 'button' : 'span'
+  return (
+    <Tag
+      {...(onClick ? { type: 'button' as const, onClick, 'aria-label': label } : {})}
+      title={label}
+      className={cn(
+        'grid size-9 place-items-center rounded-lg transition-colors',
+        strong
+          ? 'border border-border bg-surface shadow-sm hover:border-hover-border hover:bg-hover'
+          : 'text-muted-foreground hover:bg-hover hover:text-foreground',
+      )}
+    >
+      {children}
+    </Tag>
   )
 }

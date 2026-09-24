@@ -82,3 +82,13 @@ Covered by `backend/tests/test_layering.py` (the repository and service stay
 free of FastAPI imports) and exercised end to end in the browser: conversations
 appear grouped under Today, the active one is highlighted, selecting one loads
 its messages, and a deleted conversation returns to the empty state.
+
+## Minimising the sidebar
+
+From md up the sidebar folds to a 60px rail -- a way back, a new chat, and the
+account -- with the minimise button beside **New chat**. The conversation list
+is the part that takes room, and it is one click away. The choice is
+remembered in the browser, because a sidebar that springs back open on every
+reload is one somebody has to fold again every time. On a phone the sidebar is
+already a drawer, and folding it would only hide the button that opens it, so
+it is unaffected.
