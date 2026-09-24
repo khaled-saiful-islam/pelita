@@ -188,7 +188,7 @@ async def _forever() -> AsyncIterator[ChatEvent]:
 
 @pytest.fixture
 def api(session):
-    from app.api.deps import get_session
+    from app.api.deps import get_session, limit_auth
     from app.main import create_app
 
     app = create_app()
@@ -196,7 +196,14 @@ def api(session):
     async def _session():
         yield session
 
+    async def _no_auth_limit() -> None:
+        return None
+
     app.dependency_overrides[get_session] = _session
+    # The sign-in limit is counted per address across the whole run, and these
+    # sign in. Left on, they spend the budget `test_rate_limit.py` measures, and
+    # that file fails in a full run while passing on its own -- which it did.
+    app.dependency_overrides[limit_auth] = _no_auth_limit
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
