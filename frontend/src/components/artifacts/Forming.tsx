@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
-import { lookOf } from '@/components/artifacts/kind-look'
+import { colourOf, lookOf } from '@/components/artifacts/kind-look'
 import type { ArtifactBuild } from '@/lib/chat-types'
-import { accentOn, readableOn, vividOf } from '@/lib/contrast'
+import { accentOn, readableOn } from '@/lib/contrast'
 
 /**
  * The artifact, before it exists.
@@ -58,11 +58,10 @@ export function Forming({ build }: { build: ArtifactBuild }) {
     <div
       className="forming-stage relative mx-auto w-full max-w-md"
       data-phase={phase}
-      // Lit in its own theme: the kind's colour while nothing is decided, then
-      // the most vivid colour of the palette it chose. A fixed amber behind a
-      // navy-and-vermilion poster was the one colour on screen that had
-      // nothing to do with it.
-      style={{ ['--glow' as string]: glowOf(build.kind, design?.palette) }}
+      // Always the kind's own colour, the one its card and panel wear. Taken
+      // from the palette instead, a design with a gold in it glowed in
+      // Pelita's own amber, and every artifact looked like the app.
+      style={{ ['--glow' as string]: colourOf(build.kind) }}
     >
       {/* The light it is being made under. Warm on purpose, and the one colour
           here that is not the artifact's own — it belongs to the workshop, not
@@ -128,13 +127,6 @@ export function Forming({ build }: { build: ArtifactBuild }) {
       </div>
     </div>
   )
-}
-
-function glowOf(kind: string, palette?: string[]): string {
-  const vivid = palette ? vividOf(palette) : null
-  if (vivid) return vivid
-  const known = ['poster', 'slides', 'games', 'website', 'app']
-  return known.includes(kind) ? `hsl(var(--kind-${kind}))` : 'hsl(var(--primary))'
 }
 
 /**

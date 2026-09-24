@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { accentOn, contrast, readableOn, vividOf } from './contrast'
+import { accentOn, contrast, readableOn } from './contrast'
 
 describe('readableOn', () => {
   it('picks the one that can actually be read', () => {
@@ -32,17 +32,5 @@ describe('accentOn', () => {
 
   it('falls back to the ink when nothing else can be seen', () => {
     expect(accentOn('#f5efe3', '#2b2a28', ['#f5efe3', '#2b2a28', '#ece4d4'])).toBe('#2b2a28')
-  })
-})
-
-describe('vividOf', () => {
-  it('finds the colour that says which artifact this is', () => {
-    // A navy ground, cream ink, a muted sage and a vermilion: the glow is
-    // vermilion, not the ground it sits on or the ink.
-    expect(vividOf(['#1e2a3a', '#d6dce4', '#8a9a86', '#c8102e'])).toBe('#c8102e')
-  })
-
-  it('has nothing to glow in for a palette of greys', () => {
-    expect(vividOf(['#111111', '#f5f5f5', '#888888'])).toBeNull()
   })
 })

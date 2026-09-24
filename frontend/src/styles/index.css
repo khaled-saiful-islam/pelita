@@ -200,8 +200,9 @@
   }
 
   /* The light it is being made under: behind the card, bleeding past its
-     edges, and in the artifact's own theme — its kind's colour until the
-     design exists, then the most vivid colour of the palette it chose.
+     edges, and always in the kind's own colour — the one its card and panel
+     wear — so a poster glows rose and a website emerald, whatever palette
+     the design settles on.
 
      A solid blob tucked *inside* the card's footprint, and the blur is what
      puts the halo outside it. Built the obvious way — a radial gradient sized

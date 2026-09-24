@@ -147,8 +147,9 @@ committed to, which is the point: what is on screen while you wait is the
 first true thing about what you are going to get.
 
 It has three states, because the build does. Behind it is a glow in the
-artifact's own theme: its kind's colour until the design exists, then the most
-vivid colour of the palette it chose.
+kind's own colour -- rose for a poster, emerald for a website -- which does not
+change when the design lands. Taken from the palette instead, a design with a
+gold in it glowed in Pelita's own amber, and every artifact looked like the app.
 
 | | What is on the card | What it looks like |
 |---|---|---|
