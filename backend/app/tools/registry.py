@@ -16,6 +16,7 @@ from app.artifacts.registry import build_kinds
 from app.core.config import Settings, get_settings
 from app.tools.artifact import CreateArtifactTool, EditArtifactTool
 from app.tools.base import Tool
+from app.tools.page_reader import PageReader
 from app.tools.serpapi import SerpApiSearch
 from app.tools.web_search import ImageSearchTool, WebSearchTool
 
@@ -30,10 +31,17 @@ def build_tools(settings: Settings | None = None) -> dict[str, Tool]:
         # this through /api/config and disables the control rather than
         # offering something that always fails.
         search = SerpApiSearch(
-            api_key=settings.serpapi_key, base_url=settings.serpapi_base_url
+            api_key=settings.serpapi_key,
+            base_url=settings.serpapi_base_url,
+            country=settings.search_country,
         )
         tools += [
-            WebSearchTool(search, limit=settings.search_max_results),
+            WebSearchTool(
+                search,
+                limit=settings.search_max_results,
+                reader=PageReader(timeout=settings.search_read_timeout_seconds),
+                pages=settings.search_read_pages,
+            ),
             ImageSearchTool(search, limit=settings.image_max_results),
         ]
 

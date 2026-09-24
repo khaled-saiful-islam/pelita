@@ -9,6 +9,7 @@ through the ordering declared in the registry.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
@@ -54,6 +55,9 @@ class TurnContext:
     tool_results: tuple[ToolResult, ...] = ()
     # Files attached to the conversation, oldest first.
     documents: tuple[AttachedDocument, ...] = ()
+    # When the turn is happening, in the person's own zone. None only where a
+    # caller has no clock, which is a test.
+    now: datetime | None = None
 
 
 @runtime_checkable

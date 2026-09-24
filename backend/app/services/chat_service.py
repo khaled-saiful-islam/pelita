@@ -25,6 +25,7 @@ from asyncio import Event
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from time import perf_counter
 from typing import Any
 from uuid import UUID
@@ -40,6 +41,7 @@ from app.context.base import (
 )
 from app.context.contributors import format_results, images_already_shown
 from app.context.pipeline import build_messages
+from app.core.clock import Clock, now_in, utc_now
 from app.core.errors import NotFoundError, ValidationError
 from app.core.tokens import count_message_tokens, count_tokens
 from app.db.models.conversation import Conversation, Message
@@ -145,6 +147,8 @@ class TurnSettings:
     document_max_per_conversation: int = 3
     tool_calling_enabled: bool = True
     tool_max_iterations: int = 3
+    # For a request that does not say where the person is.
+    default_timezone: str = "UTC"
 
 
 @dataclass(slots=True)
@@ -156,6 +160,9 @@ class TurnState:
     """
 
     question: str
+    # When this turn is happening, in the person's zone: the one moment the
+    # prompt and every set of results in it are dated by.
+    now: datetime | None = None
     conversation_id: UUID | None = None
     user_id: UUID | None = None
     assistant_id: UUID | None = None
@@ -261,7 +268,9 @@ class ChatService:
         settings: TurnSettings,
         tools: dict[str, Tool] | None = None,
         guards: tuple[Guard, ...] = (),
+        clock: Clock = utc_now,
     ) -> None:
+        self._clock = clock
         self._session_maker = session_maker
         self._provider = provider
         self._build_contributors = contributor_factory
@@ -281,8 +290,10 @@ class ChatService:
         regenerate_of: UUID | None = None,
         search_mode: str = "auto",
         artifact_id: UUID | None = None,
+        timezone: str | None = None,
     ) -> AsyncIterator[ChatEvent]:
         start, state = await self._open(user_id, conversation_id, content, regenerate_of)
+        state.now = now_in(timezone, default=self._settings.default_timezone, clock=self._clock)
         # Where this turn is happening, so anything it makes can be stored
         # against the right conversation and the right answer.
         state.conversation_id = start.conversation_id
@@ -686,7 +697,10 @@ class ChatService:
         if sink is not None:
             sink.append(
                 format_results(
-                    added, model=self._provider.info.model, budget=self._settings.budget.tools
+                    added,
+                    model=self._provider.info.model,
+                    budget=self._settings.budget.tools,
+                    now=state.now,
                 )
                 if added
                 else "The search returned no usable results."
@@ -755,6 +769,7 @@ class ChatService:
             language=state.language,
             tool_results=() if state.offered else state.citations,
             documents=documents,
+            now=state.now,
         )
         built, trace = await build_messages(turn, self._build_contributors(memories))
         logger.info("prompt assembled for %s: %s", start.assistant_message_id, trace.as_dict())
@@ -956,21 +971,22 @@ class ChatService:
         """Sanitise tool output, keeping the cleaned text for the prompt.
 
         Title and url are preserved: a citation should still be clickable even
-        when its page misbehaved.
+        when its page misbehaved. What was read from the page is scanned like
+        the snippet: nobody asked that page for instructions, and there is far
+        more of it than two lines.
         """
         cleaned: list[ToolResult] = []
         verdicts: list[GuardVerdict] = []
 
         for result in results:
-            found = self._scan(result.snippet, ContentSource.WEB_SEARCH)
-            verdicts.extend(found)
+            in_snippet = self._scan(result.snippet, ContentSource.WEB_SEARCH)
+            in_page = self._scan(result.excerpt, ContentSource.WEB_SEARCH) if result.excerpt else []
+            verdicts.extend((*in_snippet, *in_page))
             cleaned.append(
-                ToolResult(
-                    tool=result.tool,
-                    title=result.title,
-                    url=result.url,
-                    snippet=found[-1].sanitized if found else result.snippet,
-                    rank=result.rank,
+                replace(
+                    result,
+                    snippet=in_snippet[-1].sanitized if in_snippet else result.snippet,
+                    excerpt=in_page[-1].sanitized if in_page else result.excerpt,
                 )
             )
         return tuple(cleaned), verdicts

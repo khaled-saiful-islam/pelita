@@ -38,10 +38,12 @@ renumbering anything:
 | order | contributor | added by |
 |---|---|---|
 | 100 | system prompt | 002 |
-| 200 | memory | 017 |
-| 300 | tool results — search, news | 015, 016 |
-| 350 | *free — retrieval / RAG* | — |
+| 150 | the date and time, and what they rule out | 011 |
+| 200 | memory | 013 |
+| 300 | tool results — search | 011 |
+| 350 | attached files — the retrieval slot | 018 |
 | 400 | history | 002 |
+| 450 | a challenge to the last answer, when there is one | 011 |
 | 500 | user message | 002 |
 
 ### The trace

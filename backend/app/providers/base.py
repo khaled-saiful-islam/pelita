@@ -206,6 +206,13 @@ class ToolResult:
     # citation is always something a person can open and check.
     thumbnail_url: str = ""
     image_url: str = ""
+    # When the page says it was written, as the search or the page put it:
+    # "May 19, 2026", "3 hours ago". Empty when neither said, never a guess.
+    published: str = ""
+    # What the page itself says, read after the search, for the model only.
+    # The snippet is Google's two lines about a page; this is the paragraph
+    # that answers.
+    excerpt: str = ""
 
     @property
     def is_image(self) -> bool:

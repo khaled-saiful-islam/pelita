@@ -151,3 +151,30 @@ async def test_the_reason_names_the_phrase_that_triggered_it() -> None:
     """The UI shows this, so a search never looks like it happened at random."""
     decision = await decide("What is the current weather in KL?")
     assert "current" in decision.reason
+
+
+# --- the clock ----------------------------------------------------------
+
+ASKS_THE_CLOCK = [
+    "what is the current date?",
+    "What's today's date",
+    "what day is it today?",
+    "what time is it now",
+    "What is the date today?",
+    "tarikh hari ini?",
+    "pukul berapa sekarang",
+]
+
+
+@pytest.mark.parametrize("message", ASKS_THE_CLOCK)
+async def test_the_date_and_time_are_known_not_searched(message: str) -> None:
+    """Searched, "what is the current date?" came back with the Today Show."""
+    decision = await decide(message, provider=StubClassifier("YES"))
+    assert not decision.needs_search
+    assert not decision.used_model
+
+
+async def test_a_question_about_a_date_is_still_a_question_about_the_world() -> None:
+    """The date *of something* is not the clock: it goes on to be judged."""
+    decision = await decide("what is the date of the next GE?", provider=StubClassifier("YES"))
+    assert decision.needs_search and decision.used_model

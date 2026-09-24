@@ -52,6 +52,20 @@ NEEDS_CURRENT = re.compile(
     re.IGNORECASE,
 )
 
+# The date and the time, asked for on their own. They are in the prompt, so
+# searching for them found the Today Show instead. "The date of the next GE"
+# is not this: only the clock itself, and nothing after it.
+ASKS_THE_CLOCK = re.compile(
+    r"^\s*(?:"
+    r"what(?:'s| is)\s+(?:the\s+)?(?:current\s+|today'?s\s+)?(?:date|time|day)"
+    r"(?:\s+(?:is it\s+)?(?:today|now|right now))?"
+    r"|what\s+(?:day|time|date)\s+is\s+it(?:\s+(?:today|now|right now))?"
+    r"|(?:today'?s\s+)?date\s+today"
+    r"|tarikh\s+hari\s+ini|hari\s+ini\s+hari\s+apa|(?:pukul|jam)\s+berapa\s+sekarang"
+    r")\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
 # Things the model can do entirely from what it already knows. Searching these
 # spends money and seconds for a worse answer.
 NEVER_NEEDS_CURRENT = re.compile(
@@ -130,6 +144,9 @@ async def decide(
 
     if CODE_BLOCK.search(text):
         return SearchDecision(False, "contains a code block")
+
+    if ASKS_THE_CLOCK.match(text):
+        return SearchDecision(False, "the date and time are known")
 
     if NEVER_NEEDS_CURRENT.search(text):
         return SearchDecision(False, "creative or code task")

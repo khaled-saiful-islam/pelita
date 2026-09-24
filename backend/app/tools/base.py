@@ -251,17 +251,20 @@ def bind_arguments(tool: Tool, arguments: dict[str, Any]) -> dict[str, Any]:
     add `limit` to a search must not reach a tool that never offered one, and
     `run(**kwargs)` would accept it silently.
 
-    A tool with exactly one parameter keeps the near-miss rescue — `q` for
-    `query` runs instead of failing. It is deliberately not extended to tools
-    with several parameters, where guessing which value was meant for which
-    name is how a booking for Ipoh becomes a booking for two.
+    A tool with exactly one required parameter keeps the near-miss rescue —
+    `q` for `query` runs instead of failing — and takes the value only from a
+    key the tool never declared. So a search's optional `recency` is never
+    mistaken for its query, and a tool with several required parameters gets
+    no rescue at all: guessing which value was meant for which name is how a
+    booking for Ipoh becomes a booking for two.
     """
     declared = tool.parameters.get("properties") or {}
     bound = {name: arguments[name] for name in declared if name in arguments}
 
     required = tuple(tool.parameters.get("required") or ())
-    if len(declared) == 1 and len(required) == 1 and required[0] not in bound:
-        rescued = first_argument(tool, arguments)
+    if len(required) == 1 and required[0] not in bound:
+        strays = [value for key, value in arguments.items() if key not in declared]
+        rescued = next((v.strip() for v in strays if isinstance(v, str) and v.strip()), "")
         if rescued:
             bound[required[0]] = rescued
     return bound

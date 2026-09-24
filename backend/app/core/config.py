@@ -47,7 +47,9 @@ class Settings(BaseSettings):
 
     # ---- Context budgets (tokens) ---------------------------------------
     memory_token_budget: int = 512
-    tools_token_budget: int = 2048
+    # Search results, with the passages read from their pages. Paid on every
+    # round of a turn that searched.
+    tools_token_budget: int = 4096
     history_token_budget: int = 4096
     documents_token_budget: int = 8192
 
@@ -71,8 +73,16 @@ class Settings(BaseSettings):
     # ---- Tools ----------------------------------------------------------
     serpapi_key: str = ""
     serpapi_base_url: str = "https://serpapi.com/search"
-    search_max_results: int = 5
+    search_max_results: int = 8
     image_max_results: int = 6
+    # Pages opened per search, for the paragraph that answers and the date it
+    # was written. 0 keeps to Google's snippets.
+    search_read_pages: int = 3
+    search_read_timeout_seconds: float = 6.0
+    # Google's `gl` country code ("my"), so prices, weather and news are local.
+    search_country: str = ""
+    # The zone a turn is dated in when the browser does not say.
+    default_timezone: str = "UTC"
 
     mcp_news_command: str = "/opt/mcp-news/bin/google-news-mcp"
     mcp_news_args: str = ""

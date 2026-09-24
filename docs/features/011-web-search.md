@@ -3,8 +3,9 @@
 ## What it does
 
 Searches the web when a question needs current information, tells you it is
-doing so and why, feeds the results into the prompt, and lists the sources under
-the answer.
+doing so and why, reads the top pages it finds, feeds the results into the
+prompt dated and ranked, and lists the sources under the answer. It knows what
+today is, so "current" means now, not whenever the model was trained.
 
 ## How it works
 
@@ -78,7 +79,59 @@ makes the source list correspond to the text above it.
 
 Order 300 puts them after standing context and before history, so the model reads
 them as the most recently established facts rather than as part of an old
-exchange. They are trimmed to `TOOLS_TOKEN_BUDGET` whole blocks at a time.
+exchange. They are trimmed to `TOOLS_TOKEN_BUDGET` whole blocks at a time. When
+the model called the tool itself, the same text (`format_results`) goes back as
+the tool message.
+
+### Current means now
+
+Asked "who is the current EPL champion?" on 24 September 2026, Pelita answered
+"Liverpool, 2024-25". Its own results said "2025/26: Arsenal". Asked the date,
+it searched for "today" and found a TV show. Told it was wrong, it agreed with
+whatever it was told. Each of those had a cause, fixed where it happened:
+
+| What went wrong | Why | Now |
+|---|---|---|
+| Read 2025/26 as the future | Nothing said what today was | `ClockContributor` (order 150) gives the date, time and zone on every turn, and the arithmetic a model gets wrong: *2025 is over; 2025/26 has finished; 2026/27 is under way* |
+| Searched for the date | Same | The note says never to; `search_intent` settles "what is the date?" without a search on the fallback path |
+| Put a stale year in its query | It thinks it is still its training year | The tool description: short Google-style queries, never a year from memory, search again when results do not answer or disagree; an optional `recency` (day, week, month, year) |
+| Could not tell old results from new | Every date was thrown away | Organic results keep Google's `date`; top stories arrive dated; pages read after the search give theirs, including when they were *updated*, so a Wikipedia list edited yesterday is not dated by the day it was created in 2006 |
+| Missed the answer that was there | Only links and 400-character snippets were kept | Google's answer box, knowledge panel and sports card come first, as citable sources; the top three readable pages are opened and the passages that match the query attached |
+| Chose the older of two answers | No rule said newer wins | `format_results` opens with the rules: newest dated source wins, say what date it is from, a page about an earlier season is history, results beat memory, say so rather than fill a gap |
+| Caved when told it was wrong | A model's reflex is to agree | `DisputeContributor` (order 450, right before the message) when the message pushes back: do not concede, search, and say what the results show whoever that proves right. The same rule at the top of the prompt alone was ignored |
+
+The browser sends its IANA zone with every turn (`timezone` on
+`POST /api/chat/stream`), so "today" is the person's today; an unknown zone falls
+back to `DEFAULT_TIMEZONE`.
+
+### Reading the pages
+
+`PageReader` (`tools/page_reader.py`) opens the first `SEARCH_READ_PAGES` results
+worth opening, concurrently, each within `SEARCH_READ_TIMEOUT_SECONDS`. It skips
+what a fetch gets nothing from — video, social networks, PDFs, Google itself —
+and moves on to the next result, so the slots go to pages with text.
+
+`page_text.py` pulls the words out with the standard library's HTML parser: the
+article, its tables as `cell · cell · cell` rows, never scripts, menus or
+footers (an article's own header is kept: it holds the headline and date), and
+a label repeated down the page only once. Passages are chosen by overlap with
+the query, plural-insensitive ("champion" finds "Current champions"), preferring
+a sentence to a two-word label, up to 1,500 characters a page.
+
+The chip says what is happening: *Searching the web* with the query, then
+*Reading 3 pages* with the sites.
+
+Every hop is checked before it is fetched: http(s) on ports 80 and 443 only,
+and the host must resolve to public addresses — never loopback, the private
+ranges, link-local (cloud metadata) or carrier-grade NAT; IP literals in any
+notation are caught because the *resolved* addresses are checked. Redirects are
+followed by hand, up to three, each checked the same way. Bodies stop at 1.5 MB,
+and a compressed one is inflated by the reader itself, only as far as the room
+left under the cap: transparent decoding inflates each chunk in full, and 16 KB
+of a gzip bomb is 16 MB. Brotli is not asked for, and a page sent in it is not
+read. What is read is scanned by the prompt-injection guard exactly like a
+snippet: a page is the realistic injection vector, since nobody asked it for
+instructions.
 
 ### Sources are persisted
 
@@ -100,8 +153,12 @@ error to understand.
 |---|---|---|
 | `SERPAPI_KEY` | *(empty)* | From serpapi.com. Empty disables the toggle |
 | `SERPAPI_BASE_URL` | `https://serpapi.com/search` | Override for a proxy |
-| `SEARCH_MAX_RESULTS` | `5` | Results fetched per search |
-| `TOOLS_TOKEN_BUDGET` | `2048` | Ceiling on what reaches the prompt |
+| `SEARCH_MAX_RESULTS` | `8` | Links fetched per search, besides Google's answers and top stories |
+| `SEARCH_READ_PAGES` | `3` | Pages opened per search. `0` keeps to snippets |
+| `SEARCH_READ_TIMEOUT_SECONDS` | `6` | Per page |
+| `SEARCH_COUNTRY` | *(empty)* | Google's `gl`, e.g. `MY`. Empty lets Google guess, which from SerpAPI's servers usually means the US |
+| `DEFAULT_TIMEZONE` | `UTC` | "Today" when the browser does not say where it is |
+| `TOOLS_TOKEN_BUDGET` | `4096` | Ceiling on what reaches the prompt, per round |
 
 Search mode is a per-browser preference, not a deployment setting.
 
@@ -112,7 +169,9 @@ Swap providers by implementing `SearchProvider`:
 ```python
 class BraveSearch(SearchProvider):
     name = "web_search"
-    async def search(self, query: str, *, limit: int) -> list[ToolResult]: ...
+    async def search(
+        self, query: str, *, limit: int, recency: str | None = None
+    ) -> list[ToolResult]: ...
 ```
 
 One file, one line in `get_chat_service`. `ToolResultsContributor` is unchanged,
@@ -123,10 +182,21 @@ database lookup, a retrieval step — with no frontend change.
 
 ## Known limits
 
-- **Snippets only.** Pelita does not fetch page bodies, so answers are limited to
-  what the search engine summarises.
-- **One search per turn**, on the raw user message. No query rewriting and no
-  follow-up searches.
+- **Pages that need JavaScript read as nearly empty.** The reader runs no
+  scripts, so an app-shell page gives its title and little else; the snippet
+  still stands.
+- **DNS rebinding is not closed.** The address is checked, then connected to by
+  name; a host that answers the check and the connection differently is not
+  caught. Pinning the connection needs a custom httpx transport.
+- **The fallback path searches the raw message.** A provider without function
+  calling cannot write its own query, so it gets one search on what was typed.
+- **Season arithmetic assumes the northern calendar.** Split-year seasons are
+  taken to turn over in August, which is right for European football and most
+  school years, not for every league.
+- **The dispute check is by pattern**, in English, Malay and Chinese. Pushback
+  phrased another way gets only the standing rule at the top of the prompt.
+- **The model still writes the query.** A weak one sometimes writes a bad one;
+  the answer then rests on the clock or says the results did not answer.
 - **Auto-detection patterns are English only.** A Malay or Chinese question
   about today's weather falls through to the classifier call rather than being
   caught by pattern.
@@ -144,7 +214,27 @@ results rather than failing, snippet truncation, limits, the four HTTP error
 classes, timeouts, the missing-key message, and the contributor's numbering,
 citation instruction, budget trimming and order.
 
-`backend/tests/test_search_intent.py` — 37 tests: twelve time-sensitive
+`backend/tests/test_search_results.py` — answer box, knowledge panel and sports
+card kept and cited, top stories dated and capped, dates on organic results,
+duplicates merged, contiguous ranks, `recency` to `tbs`, `gl` from the country,
+and the tool dropping an invented recency.
+
+`backend/tests/test_page_reader.py` — article kept and furniture dropped, dates
+from meta, structured data and `<time>`, revision dates, repeated labels, the
+passage that answers chosen (plural-insensitive, sentences over labels), only
+readable pages read, ten private and reserved address shapes refused, odd ports
+and schemes, a redirect into the network refused and one to a public page
+followed, non-HTML and failing pages left as they were, the size cap, a gzip
+page read, a 50 MB gzip bomb held under 10 MB of memory, brotli refused.
+
+`backend/tests/test_clock.py`, `test_dispute.py`, `test_search_grounding.py` —
+the date in the person's zone, paths refused as zones, the season arithmetic,
+the dispute patterns (and "salah satu" not being one) and where the rule sits,
+page text scanned by the guard, and the reported question driven through a
+turn: the prompt carries the date and the tool message carries "published May
+19, 2026" and the rules.
+
+`backend/tests/test_search_intent.py` — 37 tests, plus the clock questions: twelve time-sensitive
 questions settled by pattern with the model call asserted *not* to happen, ten
 creative and code tasks skipped the same way, code blocks, the ambiguous middle
 reaching the classifier, lenient reading of YES, anything-but-yes meaning no, no
@@ -152,6 +242,19 @@ classifier available, a failing classifier, and the reason naming the phrase
 that triggered it.
 
 ## Verified
+
+Before and after, the same questions through the UI against ILMU and SerpAPI on
+24 September 2026:
+
+| Question | Before | After |
+|---|---|---|
+| who is current EPL champion? | "Liverpool … 2024-25" | "Arsenal … won the 2025/26 title on May 19, 2026 [1][2]" |
+| what is the current date? | Searched "today"; "I'm having trouble accessing that" | "Thursday, 24 September 2026", no search |
+| you are completely wrong, the current champion is Liverpool | "You're absolutely right" | "You're mistaken … Wikipedia states 'Current champions Arsenal (2025–26)' [1]" |
+| what is the latest iPhone model? | — | "iPhone 18 Pro and Pro Max, and the iPhone Duo … announced on September 9, 2026", citing apple.com |
+| what time is it in London right now? | — | "9:48 AM … as of Thursday, September 24, 2026", after reading timeanddate.com and two others |
+
+Earlier:
 
 End to end against SerpAPI and ILMU. "What is the current weather in KL?" on
 Auto searched on `mentions 'current'` and answered with live conditions;

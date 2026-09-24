@@ -250,6 +250,7 @@ async def stream(
             regenerate_of=payload.regenerate_of,
             search_mode=payload.search_mode,
             artifact_id=payload.artifact_id,
+            timezone=payload.timezone,
         ),
     )
     return EventSourceResponse(_frames(turn.follow()), ping=15)

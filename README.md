@@ -72,7 +72,7 @@ default.
 |---|---|
 | **Streaming chat** | Token-by-token over SSE, with a stop button that cancels on the server and keeps the partial answer |
 | **Leave and come back** | A turn runs on the server, not in your tab. Switch chats or reload in the middle of a build and it is still going when you return, replayed from its first event |
-| **Web search** | Optional per message. Shows "Searching the web…" while it runs and lists numbered sources under the answer |
+| **Web search** | Knows today's date in your time zone, so "current" means now. Keeps Google's own answers and every result's date, opens the top pages to read the paragraph that answers, and tells the model newest-dated wins and to say what date it is from. Pushback is checked, not conceded. Numbered sources under the answer |
 | **Tool calling** | The model picks its own tools and can run several in a turn — two questions, two searches. Falls back to pattern matching on providers without function calling |
 | **Attached files** | Text, PDF and Word files — three per chat, 5 MB each. Each appears as a card on the message that sent it, and stays readable for the rest of the chat |
 | **Image understanding** | Attach a photo, screenshot or scan and ask about it. Needs a vision model; off until you set `VISION_MODEL` |
@@ -119,6 +119,7 @@ is the only prerequisite.
 |---|---|---|
 | `WEB_PORT` / `API_PORT` | `8080` / `8000` | Change if something else holds the port |
 | `SERPAPI_KEY` | *(empty)* | Enables web search. The toggle stays disabled without it |
+| `SEARCH_COUNTRY` | *(empty)* | Google country code, e.g. `MY`, for local prices, weather and news |
 | `LLM_PRICE_INPUT_PER_1M` / `_OUTPUT_PER_1M` | `0.15` / `0.60` | **Set to your provider's real rates**, or the cost column is fiction |
 | `DOCUMENT_MAX_BYTES` / `_MAX_PER_CONVERSATION` | `5 MB` / `3` | Attached-file limits. Raising the size means raising `client_max_body_size` in `frontend/nginx.conf` too |
 | `VISION_MODEL` | *(empty)* | Enables image upload. `gpt-4o-mini`, `llama-3.2-11b-vision-preview`, `llava`. Defaults to the `LLM_` URL and key |
@@ -184,7 +185,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-1076 backend tests and 114 frontend tests, 84% backend coverage. The
+1177 backend tests and 117 frontend tests, 85% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.

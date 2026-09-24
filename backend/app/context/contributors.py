@@ -7,9 +7,12 @@ usually two contributors, or a service with a thin contributor in front of it.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
+from urllib.parse import urlparse
 
 from app.context.base import ContextContributor, TurnContext, assistant, system, user
 from app.context.pipeline import trim_to_budget
+from app.core.clock import long_date
 from app.core.tokens import count_tokens
 from app.providers.base import ChatMessage, Role, ToolResult
 from app.services.language_service import reply_instruction
@@ -95,7 +98,9 @@ class ToolResultsContributor(ContextContributor):
             messages.append(system(images_already_shown(images)))
         if documents:
             messages.append(
-                system(format_results(documents, model=ctx.model, budget=ctx.budget.tools))
+                system(
+                    format_results(documents, model=ctx.model, budget=ctx.budget.tools, now=ctx.now)
+                )
             )
         return messages
 
@@ -112,31 +117,67 @@ def images_already_shown(images: Sequence[ToolResult]) -> str:
     )
 
 
-def format_results(results: Sequence[ToolResult], *, model: str, budget: int) -> str:
-    """Numbered results plus the instruction to cite them.
+def format_results(
+    results: Sequence[ToolResult], *, model: str, budget: int, now: datetime | None = None
+) -> str:
+    """Numbered, dated results, and the rules for reading them.
 
     Shared by the contributor and the tool-calling loop, which put the same text
     in different places — a system message when the turn chose the tool, a tool
     message when the model did. One copy, so the citation numbering and the
     instruction cannot drift apart between the two paths.
+
+    The rules are the fix for an answer that read "2024–25 Premier League:
+    Liverpool" and "2025/26: Arsenal" in the same set of results and chose the
+    older one, because nothing said one was newer or that newer wins.
     """
-    lines: list[str] = [
-        "Search results are given below. Use them to answer, and cite the "
-        "ones you rely on inline as [1], [2] and so on. If they do not "
-        "answer the question, say so rather than inventing a source.",
-        "",
-    ]
+    lines: list[str] = [grounding(now), ""]
     used = count_tokens("\n".join(lines), model)
 
     for result in results:
-        block = f"[{result.rank}] {result.title}\n{result.url}\n{result.snippet}".strip()
-        cost = count_tokens(block, model)
+        cost = count_tokens(block := _block(result), model)
         if used + cost > budget:
             break
         lines.extend([block, ""])
         used += cost
 
     return "\n".join(lines).strip()
+
+
+def grounding(now: datetime | None) -> str:
+    today = f", today, {long_date(now)}" if now else ""
+    return (
+        f"Web search results, retrieved just now{today}. Answer from them, and cite "
+        "the ones you rely on inline as [1], [2] and so on.\n"
+        "- Newer beats older. For anything that changes -- a champion, a price, a "
+        "score, a version, a schedule, who holds an office -- go with the most "
+        'recent dated source, and say when the information is from ("as of 19 May '
+        '2026"). A page about an earlier season, year or version describes the '
+        "past, not now.\n"
+        "- These beat your memory. What you remember is older than they are; where "
+        "the two disagree, they are right.\n"
+        "- Say only what they support. If they do not answer the question, or "
+        "disagree with no way to tell which is newer, say so plainly -- never fill "
+        "the gap from memory, and never invent a source.\n"
+        "- If the person disputed an earlier answer, these settle it. Say plainly "
+        "what they show, whoever that proves right."
+    )
+
+
+def _block(result: ToolResult) -> str:
+    host = (urlparse(result.url).hostname or "").removeprefix("www.")
+    heading = f"[{result.rank}] {result.title}"
+    about = " · ".join(part for part in (host, _dated(result.published)) if part)
+    parts = [heading, f"{about} — {result.url}" if about else result.url, result.snippet]
+    if result.excerpt:
+        parts.append(f"From the page: {result.excerpt}")
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _dated(published: str) -> str:
+    if not published:
+        return ""
+    return published if published.startswith("updated") else f"published {published}"
 
 
 class HistoryContributor(ContextContributor):

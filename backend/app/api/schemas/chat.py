@@ -25,6 +25,12 @@ class SendMessageRequest(BaseModel):
     # The artifact the panel is showing, if any. It is what "make it warmer"
     # refers to, and without it that sentence has no subject.
     artifact_id: UUID | None = None
+    timezone: str | None = Field(
+        default=None,
+        max_length=64,
+        description="The person's IANA time zone, e.g. Asia/Kuala_Lumpur, so the "
+        "turn knows what today is where they are. Unknown zones are ignored.",
+    )
 
 
 class FeedbackRequest(BaseModel):

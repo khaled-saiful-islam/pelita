@@ -51,9 +51,24 @@ export async function openTurn(
   return fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(opening.body),
+    body: JSON.stringify({ ...opening.body, timezone: opening.body.timezone ?? localZone() }),
     signal,
   })
+}
+
+/**
+ * Where the person is, as the browser knows it.
+ *
+ * Sent with every turn, because the server's clock says what time it is in
+ * UTC and "what is today's date?" asked at 07:00 in Kuala Lumpur is still
+ * yesterday there.
+ */
+export function localZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**

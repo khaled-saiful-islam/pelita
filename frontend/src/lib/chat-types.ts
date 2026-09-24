@@ -204,4 +204,6 @@ export interface StreamBody {
   search_mode?: SearchMode
   /** What the panel is showing. It is what "make it warmer" refers to. */
   artifact_id?: string | null
+  /** The person's IANA zone, so "today" on the server is their today. */
+  timezone?: string
 }

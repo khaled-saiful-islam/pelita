@@ -124,6 +124,7 @@ def get_chat_service(settings: SettingsDep) -> ChatService:
             document_max_per_conversation=settings.document_max_per_conversation,
             tool_calling_enabled=settings.tool_calling_enabled,
             tool_max_iterations=settings.tool_max_iterations,
+            default_timezone=settings.default_timezone,
         ),
     )
 

@@ -65,10 +65,12 @@ This is the central design idea. `context/pipeline.py` sorts contributors by
 
 ```
 100  system prompt
+150  the date and time (`context/clock.py`)
 200  memory
 300  tool results
 350  attached files — the retrieval slot (`context/documents.py`)
 400  history
+450  a challenge to the last answer (`context/dispute.py`)
 500  the user message
 ```
 
@@ -100,7 +102,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 84% backend, across 1076 backend and 114 frontend tests.
+Target 80%. Currently 85% backend, across 1177 backend and 117 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -230,7 +232,8 @@ class WeatherTool(Tool):
 
 A tool is handed **every argument it declared** and nothing else — `bind_arguments`
 drops what the model invented, and keeps the near-miss rescue (`q` for `query`)
-for single-parameter tools only. A missing required argument is reported by name
+for tools with exactly one required parameter, filled only from a key the tool
+never declared. A missing required argument is reported by name
 rather than as "no usable argument", because the model can only fix a call it
 understands.
 

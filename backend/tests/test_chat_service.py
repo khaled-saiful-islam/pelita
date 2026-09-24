@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.context.clock import ClockContributor
 from app.context.contributors import (
     HistoryContributor,
     MemoryContributor,
@@ -114,6 +115,8 @@ def build_service(
     extract: bool = False,
     tools: dict | None = None,
     tool_calling: bool = False,
+    clock=None,
+    guards: tuple = (),
 ) -> ChatService:
     @asynccontextmanager
     async def session_maker():
@@ -124,6 +127,9 @@ def build_service(
     def contributors(memories: tuple[str, ...]):
         return (
             SystemPromptContributor("You are Pelita."),
+            # Only when a test fixes the time: the rest assert on prompts that
+            # would otherwise carry whatever the real clock said.
+            *((ClockContributor(),) if clock else ()),
             *((MemoryContributor(memories),) if memories_in_prompt else ()),
             HistoryContributor(),
             UserMessageContributor(),
@@ -135,6 +141,8 @@ def build_service(
         contributor_factory=contributors,
         cancellation=registry,
         tools=tools,
+        guards=guards,
+        **({"clock": clock} if clock else {}),
         settings=TurnSettings(
             budget=TokenBudget(memory=256, tools=512, history=1024),
             pricing=Pricing(
