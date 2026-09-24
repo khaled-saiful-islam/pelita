@@ -1,7 +1,9 @@
 # 024 — Artifacts (design)
 
-**Status:** design, not built. The shipped feature document will be
-`docs/features/024-artifacts.md`, written with the code.
+**Status:** superseded by [`docs/features/024-artifacts.md`](../features/024-artifacts.md).
+Built, and grown since: slide decks, games, websites and apps followed the
+poster. This is the design as it was first written, kept for its reasoning;
+where the two disagree, the feature document is right.
 
 ## What it does
 

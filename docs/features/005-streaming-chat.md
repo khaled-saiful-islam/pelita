@@ -20,8 +20,30 @@ keeps whatever text had already arrived.
 | `done` | `finish_reason` — `stop` \| `stopped` \| `length` \| `error` | Always last |
 
 Adding an event type is additive: a client that does not recognise one ignores
-it. That is what lets sources, usage and suggestions arrive in later features
-without a breaking change to this contract.
+it. That is what let every later event arrive without a breaking change to
+this contract, each documented with its feature:
+
+| events | feature |
+|---|---|
+| `sources`, `images` | [011 — Web search](011-web-search.md), [017 — Images and citations](017-images-and-citations.md) |
+| `usage` | [009 — Token and cost accounting](009-token-and-cost-accounting.md) |
+| `suggestions` | [014 — Suggestions](014-suggestions.md) |
+| `guard` | [015 — Prompt-injection guard](015-prompt-injection-guard.md) |
+| `tool` | [020 — Tool calling](020-tool-calling.md) |
+| `artifact.start` · `.step` · `.design` · `.plan` · `.part` · `.delta` · `.done` · `.failed` | [024 — Artifacts](024-artifacts.md) |
+
+### A turn outlives the connection watching it
+
+The turn runs in its own task, not inside the request that asked for it
+(`app/services/live_turns.py`). What it emits goes into a buffer, and
+connections subscribe: `POST /api/chat/stream` starts a turn and subscribes to
+it, and `GET /api/chat/live/{conversation_id}` subscribes to one already
+running, replayed from its first event — or answers 204 when nothing is. The
+client asks on the way into every conversation, and retries a dropped
+connection three times with a backoff. So a reload, a switch to another chat
+or a flaky network mid-answer comes back to the whole answer, still arriving.
+[024](024-artifacts.md#a-build-outlives-the-connection-watching-it) has the
+detail, since a build of several minutes is where it matters most.
 
 ### Why the assistant row exists before the first token
 
@@ -108,8 +130,10 @@ preferences.
   `--workers 2` silently breaks the stop button. Lifting this means replacing
   the registry with a shared store keyed by message id — the class is three
   methods and nothing outside it knows how it works.
-- **No resume.** Closing the tab mid-stream persists the partial answer, but
-  reopening does not reconnect to the live generation.
+- **A live turn lives in one process.** The buffer a reconnect replays from is
+  in memory, so with more than one API worker a reconnect must reach the
+  worker running the turn, and a restart ends every turn in flight — each keeps
+  the text it had written, but an artifact still being built is lost.
 - **No streaming retry.** A provider failing at token 400 keeps those 400 tokens
   and reports the error; it does not restart.
 - **History is a fixed window**, the newest 50 messages trimmed to the token

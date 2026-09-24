@@ -100,7 +100,7 @@ see that?".
 
 ## Testing
 
-Target 80%. Currently 88% backend, across 666 backend and 44 frontend tests.
+Target 80%. Currently 84% backend, across 1076 backend and 114 frontend tests.
 
 - Service tests use **fakes, not mocks** (`tests/fakes.py`, `FakeProvider` in
   `test_chat_service.py`). Asserting on call arguments tests the wiring; these
@@ -158,8 +158,13 @@ SSE events from `/api/chat/stream`:
 
 ```
 start · guard · tool · images · sources · token · usage · suggestions · done · error
-artifact.start · artifact.step · artifact.delta · artifact.done · artifact.failed
+artifact.start · artifact.step · artifact.design · artifact.plan · artifact.part
+artifact.delta · artifact.done · artifact.failed
 ```
+
+A turn runs in its own task, not in the request (`services/live_turns.py`);
+connections subscribe to its buffer. `GET /api/chat/live/{conversation_id}`
+rejoins one still running, replayed from its first event, or answers 204.
 
 Adding an event type is additive — a client that does not recognise one ignores
 it. Add a dataclass in `services/events.py`, a case in `_to_sse`, and a case in
@@ -174,17 +179,20 @@ error, because those tokens were still paid for.
 
 ## Artifacts
 
-An artifact is **one self-contained HTML document** — a poster today, a deck or
-a small app later. Not a component and not a template plus data: a document is
-the only format the browser, the printer, the share link and the download all
-already understand, which is why this feature adds no service and no
+An artifact is **one self-contained HTML document** — a poster, a slide deck, a
+game, a website or an app. Not a component and not a template plus data: a
+document is the only format the browser, the printer, the share link and the
+download all already understand, which is why this feature adds no service and no
 dependency.
 
 A *kind* owns its prompt, its canvas and its sandbox policy, and declares the
 last of those itself. A poster is static art, so the frame it renders in cannot
 execute a script; the same `SandboxPolicy` drives the iframe attribute and the
 CSP header, so the preview, a new tab and a shared link cannot disagree about
-what a document may do.
+what a document may do. A game, a website and an app run scripts; a website
+also answers its own forms; an app also remembers, in `artifact_states` (one
+row per artifact per user). The ones that run are used in a real browser
+(`playtest.py`, `sitetest.py`, `apptest.py`) before anyone sees them.
 
 The chat model writes a **brief** and never code. A separate model with its own
 budget directs, composes, is validated and refines. Feature notes and the known

@@ -1,9 +1,10 @@
-# 024 — Artifacts: posters, slide decks and games
+# 024 — Artifacts: posters, slide decks, games, websites and apps
 
 ## What it does
 
-Ask for a poster, a deck or a game and get one — designed, not templated — built while you watch
-and opened in a panel beside the conversation.
+Ask for a poster, a deck, a game, a website or an app and get one — designed,
+not templated — built while you watch and opened in a panel beside the
+conversation.
 
 ```
 you   Design a wide banner for a badminton tournament at Dewan
@@ -19,17 +20,23 @@ you   Design a wide banner for a badminton tournament at Dewan
       └─────────────────────────────────────────────────┘
 ```
 
-![A poster designed from a one-line brief](../images/pelita-poster.png)
+![A poster for a night market in Kota Bharu, designed from a one-line brief](../images/pelita-poster.png)
 
-![A deck, each slide on one of the grounds its design chose](../images/pelita-slides.png)
+![A five-slide deck, each slide on one of the grounds its design chose](../images/pelita-slides.png)
 
-![A game, played to a game over, from a one-line brief](../images/pelita-game.png)
+![A game, run in a browser before it was shown](../images/pelita-game.png)
 
-![The build in progress: the artifact forming in its own ground and face](../images/pelita-building.png)
+![A landing page in the panel, with the Desktop, Tablet and Phone switcher](../images/pelita-website.png)
+
+![An app that remembers what was put in it: a standup spinner](../images/pelita-app.png)
+
+![The build in progress: the artifact forming in its own ground and face, lit in its kind's colour](../images/pelita-building.png)
 
 An artifact is **one self-contained HTML document**. That is the whole format,
 and it is why this feature adds no service, no build step and no dependency. A
-poster is one canvas; a deck is one `<section>` per slide in the same file.
+poster is one canvas; a deck is one `<section>` per slide in the same file; a
+website is one `<section data-page>` per page; a game and an app are one
+program with their style and script inline.
 
 ## How it works
 
@@ -188,7 +195,8 @@ subscriber. Three things follow:
 - `GET /chat/live/{conversation_id}` picks up a turn already running,
   replayed **from its first event** — so what comes back is the whole build,
   not whatever is left of it. The client asks on the way into any
-  conversation, and 404 is the ordinary answer.
+  conversation, and 204 — nothing running — is the ordinary answer. (It was
+404 once, and every browser logs a 404 as a console error on every visit.)
 - A dropped connection is retried three times with a backoff, as a *follow*
   rather than a new turn. Only a refusal — the allowance ran out, the
   session expired — stops it trying, because asking again would only be

@@ -7,17 +7,21 @@ Switching from OpenAI to Groq, Ollama, OpenRouter or vLLM means editing three
 lines of `.env`. No code change, no vendor SDK — nothing in this repository
 imports `openai`, `anthropic` or anything like them.
 
-![Pelita — a chat answering from an attached brief](docs/images/pelita-chat.png)
+![Pelita — the news as a briefing across the top, and what it can make right above the chat box](docs/images/pelita-home.png)
 
-Ask for a poster or a deck and it is designed, not filled into a template —
-its own palette, type and layout, chosen for the subject, in a panel beside
-the conversation.
+Ask for a poster, a deck, a website, an app or a game and it is designed, not
+filled into a template — its own palette, type and layout, chosen for the
+subject, in a panel beside the conversation. The ones that run are used in a
+real browser before you see them, and what broke goes back to the model to fix.
 
-![A poster for a night market, designed from a one-line brief](docs/images/pelita-poster.png)
-
-![A six-slide deck, each slide on one of the grounds its design chose](docs/images/pelita-slides.png)
-
-![A snake game, played to a game over, from a one-line brief](docs/images/pelita-game.png)
+| | |
+|---|---|
+| ![A poster for a night market in Kota Bharu](docs/images/pelita-poster.png) | ![A five-slide deck on the night markets of Kuala Lumpur](docs/images/pelita-slides.png) |
+| **Poster** — a night market in Kota Bharu, with a photograph found for it | **Slides** — planned as a talk, on grounds the design named itself |
+| ![A landing page for a study-habit app](docs/images/pelita-website.png) | ![A spinner that picks who presents at standup](docs/images/pelita-app.png) |
+| **Website** — one page or several, on Desktop, Tablet or Phone | **App** — a standup spinner that remembers the team's names |
+| ![A neon police-and-thief chase game](docs/images/pelita-game.png) | ![A poster being made: its steps, and the card forming in its own ground and face](docs/images/pelita-building.png) |
+| **Game** — played in a browser before you saw it | **Being made** — what it is doing, and the look it has settled on |
 
 Nothing is templated. The two decks below were asked for the same way, and the
 design named its own grounds and picked its own faces for each subject:
@@ -28,9 +32,8 @@ design named its own grounds and picked its own faces for each subject:
 | KL Brutalism | concrete · ochre · terracotta · ink | Bricolage Grotesque + DM Sans |
 
 While it works, the panel shows what it is doing and the look it has settled
-on — never the markup being written.
-
-![The build in progress: the artifact forming in its own ground and face](docs/images/pelita-building.png)
+on, glowing in its kind's colour — never the markup being written. Leave for
+another chat and come back: it is still being made.
 
 ## Quick start
 
@@ -68,6 +71,7 @@ default.
 | | |
 |---|---|
 | **Streaming chat** | Token-by-token over SSE, with a stop button that cancels on the server and keeps the partial answer |
+| **Leave and come back** | A turn runs on the server, not in your tab. Switch chats or reload in the middle of a build and it is still going when you return, replayed from its first event |
 | **Web search** | Optional per message. Shows "Searching the web…" while it runs and lists numbered sources under the answer |
 | **Tool calling** | The model picks its own tools and can run several in a turn — two questions, two searches. Falls back to pattern matching on providers without function calling |
 | **Attached files** | Text, PDF and Word files — three per chat, 5 MB each. Each appears as a card on the message that sent it, and stays readable for the rest of the chat |
@@ -180,7 +184,7 @@ the two decisions everything else rests on.
 make test
 ```
 
-666 backend tests and 44 frontend tests, 88% backend coverage. The
+1076 backend tests and 114 frontend tests, 84% backend coverage. The
 prompt-injection guard ships with both an attack corpus and a benign corpus —
 the benign one matters more, because a guard that fires on "how do I ignore case
 in a regex?" gets switched off, and a guard that is off catches nothing.
